@@ -16,6 +16,11 @@ I love the way it presents an album cover together with a disc. I used to collec
 
 I wanted to bring this digital record experience to Salt Player: enjoying the convenience of digital music while keeping some of the pleasure of collecting and appreciating physical albums, and sharing it with others who feel the same way.
 
+## Results Showcase
+
+https://github.com/user-attachments/assets/f5748b0e-60d9-479d-b989-3f14c318be39
+
+
 ## Features
 
 - **Primary detail page**: keeps SPW's native album cover, lyrics, and playback controls.
