@@ -1,0 +1,19 @@
+# Build outputs and local toolchain
+.gradle/
+build/
+dist/
+*.spmod
+*.class
+*.jar
+*.dll
+*.exe
+*.log
+toolchain/
+inputs/
+# Local host path and IDE settings
+gradle.properties
+.idea/
+.vscode/
+*.iml
+Thumbs.db
+.DS_Store

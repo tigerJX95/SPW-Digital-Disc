@@ -1,0 +1,25 @@
+// P4.7 Java build route; use the existing JDK25 / Gradle9.8 toolchain.
+// Host dependencies are compileOnly and are never bundled in the plugin.
+plugins { id 'java' }
+group = 'io.github.tigerjx95.spwcd'
+version = '1.0.0'
+def host = providers.gradleProperty('saltPlayerArchive')
+java { sourceCompatibility = JavaVersion.VERSION_21; targetCompatibility = JavaVersion.VERSION_21 }
+sourceSets.main.java.srcDirs = ['src']
+dependencies { compileOnly files(host) }
+tasks.withType(JavaCompile).configureEach { options.encoding = 'UTF-8'; options.release = 21 }
+tasks.register('verifyHost', Exec) {
+    commandLine (System.getProperty('os.name').toLowerCase().contains('windows') ? 'python' : 'python3'), 'verify_host.py', host.getOrElse('MISSING_HOST')
+}
+tasks.named('compileJava') { dependsOn 'verifyHost' }
+tasks.register('plugin', Zip) {
+    dependsOn 'compileJava'
+    archiveFileName = 'SPW_Digital_Disc_V1.0.0.spmod'
+    destinationDirectory = layout.projectDirectory.dir('dist')
+    from(layout.buildDirectory.dir('classes/java/main')) { into 'classes' }
+    from('MANIFEST.MF') { into 'classes/META-INF' }
+}
+tasks.named('plugin') {
+    from('LICENSE')
+    from('licenses') { into 'licenses' }
+}
