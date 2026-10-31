@@ -14,7 +14,7 @@ tasks.register('verifyHost', Exec) {
 tasks.named('compileJava') { dependsOn 'verifyHost' }
 tasks.register('plugin', Zip) {
     dependsOn 'compileJava'
-    archiveFileName = 'SPW_Digital_Disc_V1.0.0.spmod'
+    archiveFileName = "SPW_Digital_Disc_V${project.version}.spmod"
     destinationDirectory = layout.projectDirectory.dir('dist')
     from(layout.buildDirectory.dir('classes/java/main')) { into 'classes' }
     from('MANIFEST.MF') { into 'classes/META-INF' }
@@ -23,3 +23,4 @@ tasks.named('plugin') {
     from('LICENSE')
     from('licenses') { into 'licenses' }
 }
+
