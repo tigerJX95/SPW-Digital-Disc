@@ -2,7 +2,7 @@
 // Host dependencies are compileOnly and are never bundled in the plugin.
 plugins { id 'java' }
 group = 'io.github.tigerjx95.spwcd'
-version = '1.0.0'
+version = '1.0.1'
 def host = providers.gradleProperty('saltPlayerArchive')
 java { sourceCompatibility = JavaVersion.VERSION_21; targetCompatibility = JavaVersion.VERSION_21 }
 sourceSets.main.java.srcDirs = ['src']
@@ -14,7 +14,7 @@ tasks.register('verifyHost', Exec) {
 tasks.named('compileJava') { dependsOn 'verifyHost' }
 tasks.register('plugin', Zip) {
     dependsOn 'compileJava'
-    archiveFileName = "SPW_Digital_Disc_V${project.version}.spmod"
+    archiveFileName = "SPW_Digital_Disc_v${project.version}.spmod"
     destinationDirectory = layout.projectDirectory.dir('dist')
     from(layout.buildDirectory.dir('classes/java/main')) { into 'classes' }
     from('MANIFEST.MF') { into 'classes/META-INF' }
@@ -23,4 +23,3 @@ tasks.named('plugin') {
     from('LICENSE')
     from('licenses') { into 'licenses' }
 }
-

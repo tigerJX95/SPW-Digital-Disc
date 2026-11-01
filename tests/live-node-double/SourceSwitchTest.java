@@ -25,6 +25,12 @@ public class SourceSwitchTest {
    artwork.setValue(next);check(source.invoke(frame)==next,"capture adopts current source");
    previous=next;
   }
+  Object temporary=new Object();
+  HostCoverBridge.nodes.put(root,List.of(new HostCoverBridge.Image(temporary,root,420*420)));
+  artwork.setValue(temporary);check(source.invoke(frame)==temporary,"temporary sole native node takes over");
+  HostCoverBridge.nodes.put(root,List.of(new HostCoverBridge.Image(previous,root,420*420)));
+  check(source.invoke(frame)==previous,"production Frame recovers original live source after temporary node disappears");
+  artwork.setValue(previous);
   rejected.setValue(previous);check(source.invoke(frame)==null,"closed/rejected source skipped for native fallback");
   Object fresh=new Object();HostCoverBridge.nodes.put(root,List.of(new HostCoverBridge.Image(fresh,root,420*420)));
   check(source.invoke(frame)==fresh,"new track recovers after old source failure");

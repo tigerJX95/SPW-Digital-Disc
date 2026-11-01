@@ -4,9 +4,9 @@
 
 Adds a digital CD presentation to Salt Player for Windows (SPW), with a complete album cover and a CD extending from its right side.
 
-Current version: **V1.0.0**, for **SPW 1.19.0 Microsoft Store**.
+Current version: **v1.0.1**, for **SPW 1.19.0 Microsoft Store**.
 
-Building on the album cover/CD display and local disc artwork support, this version adds disc eject/retract animations, track-change animations, protection for rapid track changes, reopening behavior, and a translucent center hub ring.
+This version fixes an intermittent transition bug where the secondary display reverted to SPW's native album-cover-only view after the CD ejected and remained stuck without ejecting again. Existing local disc artwork, eject/retract animations and the translucent center hub ring are retained.
 
 ## Background
 
@@ -46,7 +46,7 @@ After a track change, the plugin waits for a selection-stability interval of abo
 
 Collapsing the entire playback detail page or disabling the plugin cancels unfinished animations and delayed return actions, preventing remnants from appearing over the mini player. Different return paths and rapid interactions still leave room for improvement.
 
-The current installation package is `SPW_Digital_Disc_V1.0.0.spmod`. The source ZIP is for development and building; choose the `.spmod` file when installing.
+The current installation package is `SPW_Digital_Disc_v1.0.1.spmod`. The source ZIP is for development and building; choose the `.spmod` file when installing.
 
 ## Where to put local disc images
 
@@ -83,6 +83,13 @@ Recommended result: **1000 × 1000 pixels, PNG format, transparent background, t
 - **Transitions**: cover enlargement, eject, retract, and track-change animations are implemented. Timing and smoothness during rapid interactions, different return paths, and repeated expansion/collapse can still be improved.
 - **Limited compatibility**: only the SPW version listed above has been tested. Different window sizes, scaling factors, and SPW updates require continued testing.
 - **Limited configuration**: there is no plugin settings page yet. Disc filenames, search order, and display dimensions currently follow fixed settings.
+
+## v1.0.1 update
+
+- **Fixed transition fallback**: after opening the secondary display from the primary detail page, the CD could eject and then unexpectedly revert to SPW's native album-cover-only view, remaining stuck without ejecting again. The plugin now owns an independent copy of the current song's decoded cover pixels, so native transition-node cleanup or disposal does not revoke the combined display.
+- **Improved display recovery**: recover usable same-song cover sources and recheck Canvas layout readiness when reopening the display.
+- **Release old-song resources**: discard cover copies on track changes, when hiding the page, and when disabling the plugin to prevent stale artwork.
+- Keep local builds and manual `.spmod` uploads as the release process.
 
 ## V1.0.0 initial release
 
@@ -166,7 +173,7 @@ If using PowerShell, configure the same environment variables and run this in th
 After the build reports `BUILD SUCCESSFUL`, look in the source directory's `dist` folder for:
 
 ```text
-SPW_Digital_Disc_V1.0.0.spmod
+SPW_Digital_Disc_v1.0.1.spmod
 ```
 
 This is the installation package that SPW can import. You do not need to ZIP the entire source directory or rename its extension. The `build` directory contains intermediate build output, not the installation package.

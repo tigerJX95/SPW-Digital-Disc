@@ -16,13 +16,24 @@ final class HostCoverBridge {
             for(var field:type.getDeclaredFields()){
                 if(java.lang.reflect.Modifier.isStatic(field.getModifiers()))continue;
                 if(field.getType()==org.jetbrains.skia.Shader.class)try{
-                    field.setAccessible(true);if(field.get(painter)!=null)return true;
+                    field.setAccessible(true);if(field.get(painter) instanceof org.jetbrains.skia.Shader shader&&!shader.isClosed())return true;
                 }catch(ReflectiveOperationException|RuntimeException ignored){}
             }
         }
         return false;
     }
     record Image(Object painter,LayoutCoordinates coordinates,long area){}
+    static DiscImage capture(Object painter)throws Exception{
+        if(!imageReady(painter))throw new IllegalStateException("No decoded host cover");
+        long size=(Long)androidx.compose.ui.graphics.painter.Painter.class.getMethod("getIntrinsicSize-NH-jbRc").invoke(painter);
+        float w=RootRenderer.x(size),h=RootRenderer.y(size);
+        if(!Float.isFinite(w)||!Float.isFinite(h)||w<=0||h<=0)throw new IllegalStateException("Invalid host cover size");
+        for(Class<?> type=painter.getClass();type!=null;type=type.getSuperclass())for(var field:type.getDeclaredFields()){
+            if(java.lang.reflect.Modifier.isStatic(field.getModifiers())||field.getType()!=org.jetbrains.skia.Shader.class)continue;
+            field.setAccessible(true);return DiscImage.capture((org.jetbrains.skia.Shader)field.get(painter),w,h);
+        }
+        throw new IllegalStateException("No host cover shader");
+    }
     static List<Image> images(LayoutCoordinates root){
         List<Image> images=new ArrayList<>();
         if(root instanceof NodeCoordinator coordinator)collect(coordinator.getLayoutNode(),images);

@@ -39,6 +39,8 @@ public final class CdPageProbePlugin extends SpwPlugin {
   final MutableState<Object> rejectedSource=state(null);
   final MutableState<Boolean> ready=state(false);
   volatile LayoutCoordinates nativeRoot;
+  LayoutCoordinates widgetRoot;
+  float widgetWidth,widgetHeight;
   PlayerSheetState sheet;
   boolean renderAllowed=true,failed,suppressionApplied,secondary;
   Object lastPainted;
@@ -55,19 +57,58 @@ public final class CdPageProbePlugin extends SpwPlugin {
   final DiscTransition motion=new DiscTransition();
   final MutableState<DiscTransition.Pose> pose=state(motion.pose());
   String lastBoundsError="";
+  DiscImage ownedCover;
+  Object ownedSource,lastCaptureFailure;
+  String handoffDiagnostic="";
+  void clearCover(){
+   if(ownedCover!=null)ownedCover.close();ownedCover=null;ownedSource=null;lastCaptureFailure=null;
+  }
+  Object paintSource(){
+   if(!presentationVisible())return null;
+   String song;try{song=currentSong();}catch(Exception unavailable){return null;}
+   if(!Objects.equals(song,observedSong))observe(song);
+   return resolveCover(source());
+  }
+  Object resolveCover(Object live){
+   if(live!=null&&live!=ownedSource&&live!=lastCaptureFailure)try{
+    DiscImage copy=HostCoverBridge.capture(live);
+    DiscImage previous=ownedCover;ownedCover=copy;ownedSource=live;
+    if(previous!=null)previous.close();
+    report("COVER_OWNED song="+observedSong+" source="+System.identityHashCode(live));
+   }catch(Exception|LinkageError error){lastCaptureFailure=live;report("COVER_CAPTURE_ERROR "+error+" cause="+error.getCause());}
+   // The host may dispose every outgoing image node when its own transition
+   // finishes. Our already displayed pixels belong to this song, not that node.
+   return ownedCover!=null?ownedSource:live;
+  }
+  boolean presentationVisible(){
+   return secondary&&renderAllowed&&Boolean.TRUE.equals(enabled.getValue())&&sheet!=null&&sheet.Ԩ()&&sheet.ԩ();
+  }
+  void refreshReady(){
+   // A reused Canvas need not receive another position callback after collapse,
+   // while content() clears ready during the hidden interval. Re-read the live
+   // coordinates so readiness cannot remain false for the entire presentation.
+   boolean fits=false;
+   if(!failed&&widgetRoot!=null&&widgetRoot.isAttached())try{
+    long measured=size(widgetRoot);
+    fits=Math.abs((int)(measured>>>32)-widgetWidth)<=3&&Math.abs((int)measured-widgetHeight)<=3;
+   }catch(Exception ignored){}
+   ready.setValue(fits);
+  }
   boolean suppress(){
    discRevision.getValue(); // Resolve completion must redraw even while Canvas is waiting.
    sourceRevision.getValue(); // Native subtree/cached image completion is not always a parent recomposition.
-   return secondary&&Boolean.TRUE.equals(enabled.getValue())&&Boolean.TRUE.equals(ready.getValue())&&!failed&&renderAllowed&&sheet!=null&&sheet.Ԩ()&&sheet.ԩ()&&HostCoverBridge.imageReady(source())&&(Boolean.TRUE.equals(trackPending.getValue())||discResolved());
+   return secondary&&Boolean.TRUE.equals(enabled.getValue())&&Boolean.TRUE.equals(ready.getValue())&&!failed&&renderAllowed&&sheet!=null&&sheet.Ԩ()&&sheet.ԩ()&&(ownedCover!=null||HostCoverBridge.imageReady(source()))&&(Boolean.TRUE.equals(trackPending.getValue())||discResolved());
   }
   void restoreNative(){
-   secondary=false;ready.setValue(false);revealCycle.reset();motion.reset();trackGate.reset();trackPending.setValue(false);retainingReturn.setValue(false);pose.setValue(motion.pose());
+   clearCover();
+   secondary=false;ready.setValue(false);widgetRoot=null;revealCycle.reset();motion.reset();trackGate.reset();trackPending.setValue(false);retainingReturn.setValue(false);pose.setValue(motion.pose());
    if(suppressionApplied)HostCoverBridge.invalidate(nativeRoot);
    passPainter.setValue(null);suppressionApplied=false;
   }
   void syncVisibility(boolean visible){
    RevealCycle.Edge edge=revealCycle.sample(visible);
    if(edge==RevealCycle.Edge.NONE)return;
+   if(edge==RevealCycle.Edge.HIDDEN)clearCover();
    // No old pass, pending return or track request may leak into the next presentation.
    motion.reset();trackGate.reset();trackPending.setValue(false);retainingReturn.setValue(false);
    passPainter.setValue(null);suppressionApplied=false;
@@ -97,6 +138,7 @@ public final class CdPageProbePlugin extends SpwPlugin {
    coverSelection.song(song);
    boolean changed=!Objects.equals(song,observedSong);
    if(changed){
+    clearCover();
     observedSong=song;failed=false;rejectedSource.setValue(null);artwork.setValue(null);
     passPainter.setValue(null);lastPainted=null;HostCoverBridge.invalidate(nativeRoot);
    }
@@ -142,7 +184,7 @@ public final class CdPageProbePlugin extends SpwPlugin {
    // layout nodes must not be traversed by the local-image decode worker.
    sourceObserver=new javax.swing.Timer(100,event->observeSources());sourceObserver.start();
    animationClock=new javax.swing.Timer(16,event->animateFrames());animationClock.setCoalesce(true);animationClock.start();
-   report("START P4.10.2 Presentation Resume; settled visibility edge; fresh handoff; latest track entry; hooks="+handles.size());
+   report("START 1.0.1 Owned Cover; decoded pixel ownership independent of native node lifetime; hooks="+handles.size());
   }catch(Throwable e){stop();throw new IllegalStateException("SelfDraw startup failed",e);}
  }
  @SuppressWarnings("unchecked")
@@ -155,7 +197,7 @@ public final class CdPageProbePlugin extends SpwPlugin {
   Density density=(Density)composer.consume(CompositionLocalsKt.getLocalDensity());
   frame.sheet=(PlayerSheetState)composer.consume(androidx.compose.ui.ѐ.Ϳ());
   var args=call.getArguments();frame.renderAllowed=(Boolean)args.get(3);
-  boolean expanded=frame.sheet.Ԩ()&&frame.sheet.ԩ();boolean lyrics=(Boolean)args.get(1);
+  boolean lyrics=(Boolean)args.get(1);
   if(!lyrics&&!frame.secondary){frame.trackGate.reset();frame.motion.enter();frame.pose.setValue(frame.motion.pose());}
   // Native return paths may change the page before invoking our cover callback.
   // Retain the secondary visual until its disc is fully retracted.
@@ -175,10 +217,11 @@ public final class CdPageProbePlugin extends SpwPlugin {
    });
    frame.pose.setValue(frame.motion.pose());return Unit.INSTANCE;
   };
-  boolean active=!visualLyrics&&Boolean.TRUE.equals(enabled.getValue())&&expanded&&frame.renderAllowed;
+  boolean active=frame.presentationVisible();
   frame.syncVisibility(active);
   Viewport viewport=frame.viewport.getValue();
   SelfDrawLayout plan=SelfDrawLayout.fit(viewport.width(),viewport.height(),density.getDensity(),!visualLyrics);
+  frame.widgetWidth=plan.width();frame.widgetHeight=plan.height();
   if(!active||!plan.usable(density.getDensity()))frame.ready.setValue(false);
   Modifier box=SizeKt.fillMaxSize((Modifier)args.get(4),1f);
   box=OnGloballyPositionedModifierKt.onGloballyPositioned(box,c->{
@@ -188,8 +231,11 @@ public final class CdPageProbePlugin extends SpwPlugin {
   box=DrawModifierKt.drawWithContent(box,scope->{
    // Observes both enabled and ready. Turning the new widget on/off refreshes
    // cached native image layers so the fallback never stays blank/duplicated.
-   frame.passPainter.setValue(frame.suppress()?frame.source():null);
+   Object selected=frame.paintSource();
+   frame.passPainter.setValue(frame.suppress()?selected:null);
    boolean suppression=frame.passPainter.getValue()!=null;
+   String diagnostic="secondary="+frame.secondary+" allowed="+frame.renderAllowed+" ready="+frame.ready.getValue()+" failed="+frame.failed+" owned="+(frame.ownedCover!=null)+" selected="+(selected!=null)+" phase="+frame.motion.phase()+" custom="+suppression;
+   if(!diagnostic.equals(frame.handoffDiagnostic)){frame.handoffDiagnostic=diagnostic;report("DRAW_HANDOFF "+diagnostic);}
    if(suppression!=frame.suppressionApplied){frame.suppressionApplied=suppression;HostCoverBridge.invalidate(frame.nativeRoot);}
    scope.drawContent();return Unit.INSTANCE;
   });
@@ -210,6 +256,7 @@ public final class CdPageProbePlugin extends SpwPlugin {
     try{
      Modifier widget=CanvasWidget.modifier(plan,density.getDensity(),animatedToggle);
      widget=OnGloballyPositionedModifierKt.onGloballyPositioned(widget,coords->{
+      frame.widgetRoot=coords;
       if(!frame.failed)try{
        long measured=size(coords);boolean fits=coords.isAttached()&&Math.abs((int)(measured>>>32)-plan.width())<=3&&Math.abs((int)measured-plan.height())<=3;
        frame.ready.setValue(fits);
@@ -242,16 +289,21 @@ public final class CdPageProbePlugin extends SpwPlugin {
         canvas.translate(offset+pivot,plan.side()*.5f);
         canvas.scale(motion.scale(),motion.scale());
         canvas.translate(-pivot,-plan.side()*.5f);
-        RootRenderer.draw(scope,painter,()->rawSource.set(true),()->rawSource.remove(),disc,motion.exposed());
+        DiscImage cover=frame.ownedCover;
+        if(cover!=null)RootRenderer.paint(scope,cover.aspect(),cover::drawCover,disc,androidx.compose.ui.graphics.SkiaBackedPath_skikoKt::Path,motion.exposed());
+        else RootRenderer.draw(scope,painter,()->rawSource.set(true),()->rawSource.remove(),disc,motion.exposed());
         float gap=4*density.getDensity(),reflectedHeight=plan.height()-plan.side()-gap;
         if(reflectedHeight>0){
          if(frame.reflection==null)frame.reflection=new ReflectionRenderer();
-         try{frame.reflection.draw(scope,plan.side(),plan.width(),reflectedHeight,gap,()->RootRenderer.draw(scope,painter,()->rawSource.set(true),()->rawSource.remove(),disc,motion.exposed()));}
+         try{frame.reflection.draw(scope,plan.side(),plan.width(),reflectedHeight,gap,()->{
+          if(cover!=null)RootRenderer.paint(scope,cover.aspect(),cover::drawCover,disc,androidx.compose.ui.graphics.SkiaBackedPath_skikoKt::Path,motion.exposed());
+          else RootRenderer.draw(scope,painter,()->rawSource.set(true),()->rawSource.remove(),disc,motion.exposed());
+         });}
          catch(Exception error){report("REFLECTION_ERROR "+error+"; cause="+error.getCause());}
         }
        }finally{canvas.restore();}
        if(frame.lastPainted!=painter){frame.lastPainted=painter;report("SELF_DRAW source="+painter.getClass().getName()+" widgetPx="+plan.width()+"x"+plan.height()+" coverSidePx="+plan.side()+" secondary="+plan.secondary());}
-      }catch(Throwable error){frame.passPainter.setValue(null);frame.rejectedSource.setValue(painter);HostCoverBridge.invalidate(frame.nativeRoot);report("SELF_DRAW_SOURCE_ERROR native fallback until a fresh source: "+error);}
+      }catch(Throwable error){frame.clearCover();frame.passPainter.setValue(null);frame.rejectedSource.setValue(painter);HostCoverBridge.invalidate(frame.nativeRoot);report("SELF_DRAW_SOURCE_ERROR native fallback until a fresh source: "+error+"; cause="+error.getCause());}
       return Unit.INSTANCE;
      },c,0);
     }catch(Exception error){frame.failed=true;frame.ready.setValue(false);report("WIDGET_ERROR "+error);}
@@ -287,10 +339,13 @@ public final class CdPageProbePlugin extends SpwPlugin {
    Frame frame=it.next().get();if(frame==null){it.remove();continue;}
    // Expanded target alone is insufficient: animation must not run while the
    // host is still moving from/to the mini player (including interrupted gestures).
-   boolean visible=frame.secondary&&frame.renderAllowed&&frame.nativeRoot!=null&&frame.nativeRoot.isAttached()
-     &&frame.sheet!=null&&frame.sheet.Ԩ()&&frame.sheet.ԩ();
+   // Composition and timer must sample the same visibility predicate. A short
+   // native-node detach during AnimatedContent is not a sheet close/reopen.
+   boolean visible=frame.presentationVisible();
    frame.syncVisibility(visible);
    if(!visible)continue;
+   frame.refreshReady();
+   if(frame.nativeRoot==null||!frame.nativeRoot.isAttached())continue;
    try{
     if(frame.motion.phase()==DiscTransition.Phase.IDLE){frame.motion.enter();frame.pose.setValue(frame.motion.pose());}
     frame.coverSelection.song(song);
@@ -301,7 +356,7 @@ public final class CdPageProbePlugin extends SpwPlugin {
     }
     Object source=frame.passPainter.getValue();
     if(frame.motion.phase()==DiscTransition.Phase.TRACK_WAIT){
-     if(frame.trackGate.ready(song,source,HostCoverBridge.imageReady(source),discResolved(),now)){
+     if(frame.trackGate.ready(song,source,frame.ownedCover!=null||HostCoverBridge.imageReady(source),discResolved(),now)){
       frame.motion.trackReady(now);frame.trackPending.setValue(false);report("TRACK_ENTRY_START song="+song);
      }
     }else if(source!=null&&Boolean.TRUE.equals(frame.ready.getValue()))frame.motion.ready(now);

@@ -7,6 +7,10 @@ import androidx.compose.ui.graphics.drawscope.Fill;
 import androidx.compose.ui.graphics.ColorFilter;
 import org.jetbrains.skia.Bitmap;
 import org.jetbrains.skia.Image;
+import org.jetbrains.skia.Shader;
+import org.jetbrains.skia.Surface;
+import org.jetbrains.skia.Paint;
+import org.jetbrains.skia.Rect;
 import java.lang.reflect.Method;
 /** Owns decoded local pixels. The service lock prevents close while drawing. */
 final class DiscImage implements AutoCloseable {
@@ -25,6 +29,24 @@ final class DiscImage implements AutoCloseable {
    if(image.getWidth()!=width||image.getHeight()!=height)throw new IllegalStateException("PNG dimensions changed");
    bitmap=Bitmap.Companion.makeFromImage(image);DiscImage result=new DiscImage(bitmap);bitmap=null;return result;
   }finally{if(bitmap!=null)bitmap.close();}
+ }
+ static DiscImage capture(Shader shader,float sourceWidth,float sourceHeight)throws Exception{
+  if(shader==null||shader.isClosed())throw new IllegalStateException("Host shader is closed");
+  float factor=Math.min(1,2048f/Math.max(sourceWidth,sourceHeight));
+  int w=Math.max(1,Math.round(sourceWidth*factor)),h=Math.max(1,Math.round(sourceHeight*factor));
+  Bitmap bitmap=null;
+  try(Surface surface=Surface.Companion.makeRasterN32Premul(w,h);Paint paint=new Paint()){
+   paint.setShader(shader);
+   var canvas=surface.getCanvas();canvas.scale(w/sourceWidth,h/sourceHeight);
+   canvas.drawRect(new Rect(0,0,sourceWidth,sourceHeight),paint);
+   try(Image image=surface.makeImageSnapshot()){
+    bitmap=Bitmap.Companion.makeFromImage(image);DiscImage result=new DiscImage(bitmap);bitmap=null;return result;
+   }
+  }finally{if(bitmap!=null)bitmap.close();}
+ }
+ float aspect(){return (float)width/height;}
+ void drawCover(DrawScope scope,float w,float h)throws Exception{
+  DRAW_IMAGE.invoke(scope,bitmap,0L,pack(width,height),0L,pack(Math.max(1,Math.round(w)),Math.max(1,Math.round(h))),1f,Fill.INSTANCE,null,3);
  }
  void draw(DrawScope scope,float centerX,float centerY,float diameter)throws Exception{drawBitmap(scope,bitmap,width,height,centerX,centerY,diameter);}
  static void drawBitmap(DrawScope scope,ImageBitmap bitmap,int width,int height,float cx,float cy,float diameter)throws Exception{
