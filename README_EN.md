@@ -80,20 +80,7 @@ For a transparent background or center hole, use a PNG with those transparent ar
 > 5. **Check transparency.** Temporarily enable `Test Colours` to inspect the edges and center hole against different backgrounds. Before exporting, disable that group and the `test sizes and basic rules` helper layer, leaving the area outside the disc and the center hole transparent.
 > 6. **Export a PNG.** Keep **1000 × 1000 pixels**, enable transparency, name the image `cd.png` and place it in the same directory as the audio files.
 >
-> The PSD is for editing; the player reads the exported PNG. Avoid JPG, which cannot preserve the transparent background or center hole. Keep an editable PSD copy for later changes.
-
-To display actual disc artwork, follow the steps below. Photoshop is used as an example; basic knowledge of selections, layer masks, and transparent layers is enough. Other image editors supporting these features can also be used.
-
-**The recommended size is 1000 × 1000 pixels, using a square PNG image.** Opaque rectangles are center-cropped to a square and masked to a circle. Images containing transparency are fitted proportionally into a square, keeping transparent holes and padding. Prepared images are capped at 2048 pixels per side; small images are not enlarged during preparation.
-
-1. **Start with a clear disc image**: use a clear CD scan or photograph, preferably taken straight on, without obvious tilt, distortion, or strong reflections. Keep the original file and edit a separate copy.
-2. **Cut out the CD**: use an elliptical selection or layer mask to retain the complete disc and remove the surrounding background. Keep the outer edge smooth, without white or black fringes or jagged edges. Do not include the album cover in the disc image.
-3. **Make the small center hole transparent**: remove only the actual small circular hole. The surrounding plastic hub is part of the disc; preserve its original appearance instead of cutting out the entire center area. Transparency already present in local artwork is retained. The plugin will not cut an extra hole or add a hub ring to that image.
-4. **Prepare the canvas**: crop to a square canvas, center the disc with equal width and height, and resize proportionally to **1000 × 1000 pixels**. Bring the outer edge close to the canvas boundary without clipping it. Avoid excessive transparent margins, which make the displayed disc look smaller. Do not stretch an elliptical disc into a circle or expect enlarging a small image to recover missing detail.
-5. **Export with transparency**: hide or remove unwanted background layers. Confirm that the outer background and center hole show the editor's transparency checkerboard rather than a white background. Keep an editable copy, then export a PNG with transparency enabled and name it `cd.png`. **JPG does not support a transparent background or center hole.** Renaming a JPG file does not convert it into a transparent PNG. The plugin masks JPG outer corners to transparency, but does not detect the photographed disc, remove backgrounds inside the circle or cut a center hole.
-6. **Place the file and check the result**: put `cd.png` in the song's directory. On Windows, show file extensions to avoid accidentally naming it `cd.png.png`. Inspect the outer edge, center hole, and any remaining fringes against both dark and light backgrounds. Then play a song from that directory and open the secondary display page to check the actual result.
-
-Recommended result: **1000 × 1000 pixels, PNG format, transparent background, transparent small center hole, centered disc, and a complete outer edge without excessive margins**. The search order remains `cd.png → cd.jpg → disc.png → disc.jpg`. To use a lower-priority file, first move any higher-priority image you no longer intend to use out of the same directory.
+> The PSD is for editing; the player reads the exported PNG. Keep an editable PSD copy for later changes.
 
 ## Settings
 
