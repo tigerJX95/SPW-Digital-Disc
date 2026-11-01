@@ -19,7 +19,7 @@ V1.1.0 增加出碟量、碟片前置展示和播放联动旋转，改善盘面�
 ## 效果展示
 
 
-https://github.com/user-attachments/assets/f5748b0e-60d9-479d-b989-3f14c318be39
+https://github.com/user-attachments/assets/74f35d9a-0656-40d2-9170-b83e0696891a
 
 
 ## 目前功能
