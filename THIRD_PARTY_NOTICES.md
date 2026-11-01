@@ -23,7 +23,7 @@
 - 项目：<https://github.com/tigerJX95/ReBORN-CHS-Mod>
 - 参考内容： 渐进出碟、收碟完成回调和布局缓动方法。
 - 本插件使用独立 Java 状态机实现，参考其平滑出碟和收碟节奏，封面缩放等方法。
-- 保留提供包中原始贡献部分的 [MIT 许可声明](licenses/ReBORN-CHS-Mod-MIT.txt)。
+- 保留上游原始贡献部分的 [MIT 许可声明](licenses/ReBORN-CHS-Mod-MIT.txt)。
 - 不随包分发该主题的图片或播放器资源。
 
 

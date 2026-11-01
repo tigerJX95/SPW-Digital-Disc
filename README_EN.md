@@ -4,9 +4,9 @@
 
 Adds a digital CD presentation to Salt Player for Windows (SPW), with a complete album cover and a CD extending from its right side.
 
-Current version: **v1.0.1**, for **SPW 1.19.0 Microsoft Store**.
+Current version: **v1.1.0**, for **SPW 1.19.0 Microsoft Store**.
 
-This version fixes an intermittent transition bug where the secondary display reverted to SPW's native album-cover-only view after the CD ejected and remained stuck without ejecting again. Existing local disc artwork, eject/retract animations and the translucent center hub ring are retained.
+V1.1.0 adds disc exposure, front-layer presentation and playback-linked rotation, with improved image preparation, continuous cover handoff and same-directory disc reuse. See the [changelog](CHANGELOG.md) (Chinese).
 
 ## Background
 
@@ -27,7 +27,10 @@ https://github.com/user-attachments/assets/f5748b0e-60d9-479d-b989-3f14c318be39
 - **Secondary display page**: clicking the album cover opens a larger, centered presentation of the complete cover and a CD on its right. The cover is not squeezed into half an image.
 - **Local disc artwork**: searches the current song's directory in the order `cd.png → cd.jpg → disc.png → disc.jpg`. If a higher-priority file cannot be decoded, the next file is tried.
 - **Generated disc artwork**: when no usable local disc image is available, a copy of the album cover is cropped into a circular CD with a transparent center hole and a clearly defined translucent hub ring. The album cover in front remains complete.
-- **Transparent images**: local PNG files retain their existing transparent backgrounds and center holes. No extra hole or hub ring is added.
+- **Transparent images**: local PNG files retain their existing transparent backgrounds and center holes. An antialiased circular outer mask is applied. No extra center hole or hub ring is added.
+- **Front-disc display**: enable the native plugin switch to draw the disc over the cover. Off by default. Front mode uses whole-disc motion with a short uniform fade. Compare at exposure 50; in front mode exposure controls horizontal travel, while 0 still shows only the cover.
+- **Disc exposure setting**: open SPW Digital Disc settings in the plugin manager and adjust 0–100. Default 50 preserves the existing view; 100 shows the full disc. The host saves the value. The group fits the window, and cover-only mode returns without a retract delay.
+- **Playback-linked rotation**: optional, off by default. The disc rotates after ejection, freezes on pause and resumes from the current angle. Covers stay upright and reflections match.
 - **Page animations**: the cover enlarges first, then the CD gradually slides out from behind it. Clicking the combined display to return retracts the CD before invoking the native return action. The reflection follows the same animation progress. Normal track changes replay the eject animation without rescaling the cover; rapid changes eject only the last stably selected song's disc.
 - **Combined reflection**: the cover and CD have a short reflection that fades downward.
 - Local files are read only. The plugin does not modify songs or original disc images, or save generated disc artwork to disk.
@@ -46,7 +49,7 @@ After a track change, the plugin waits for a selection-stability interval of abo
 
 Collapsing the entire playback detail page or disabling the plugin cancels unfinished animations and delayed return actions, preventing remnants from appearing over the mini player. Different return paths and rapid interactions still leave room for improvement.
 
-The current installation package is `SPW_Digital_Disc_v1.0.1.spmod`. The source ZIP is for development and building; choose the `.spmod` file when installing.
+The current installation package is `SPW_Digital_Disc_v1.1.0.spmod`. The source ZIP is for development and building; choose the `.spmod` file when installing.
 
 ## Where to put local disc images
 
@@ -61,50 +64,68 @@ Place the disc image in **the same directory as the audio file**. For example, i
 
 If all four files exist and are readable, `cd.png` is used. Use the lowercase filenames shown above. Songs in the same directory share that disc image. The plugin does not currently search parent directories or subdirectories, support custom disc image paths, or download disc artwork automatically.
 
-For a transparent background or center hole, use a PNG with those transparent areas already prepared. The plugin also works without a disc image: it automatically generates a CD from the album cover.
+For a transparent background or center hole, use a PNG with those transparent areas already prepared.
 
 ## Prepare local CD artwork (optional)
 
-You can use the plugin without preparing disc artwork: it will generate a CD from the album cover. To display actual disc artwork, follow the steps below. Photoshop is used as an example; basic knowledge of selections, layer masks, and transparent layers is enough. Other image editors supporting these features can also be used.
+> [!NOTE]
+> **Create disc artwork with the PSD template**
+>
+> [Download cdArt_Template.psd](templates/cdArt_Template.psd). This Photoshop template uses a **1000 × 1000 pixel** canvas with a circular outer edge, center hole, hub rings and optional shading. It helps turn disc scans, photographs or custom designs into transparent PNG artwork for the player.
+>
+> 1. **Open the template and save a copy.** Keep the original PSD for future use.
+> 2. **Choose a disc style.** Enable one style group containing a `YOUR IMAGE HERE` placeholder and disable the other equivalent style groups.
+> 3. **Insert your image.** Place it inside the selected group in place of the placeholder, retaining the group mask. Scale proportionally and reposition it to cover the disc without stretching.
+> 4. **Adjust the appearance.** Toggle or adjust the opacity of the `Shading` group and `Optional` effects to blend the hub rings and outer edge with the artwork.
+> 5. **Check transparency.** Temporarily enable `Test Colours` to inspect the edges and center hole against different backgrounds. Before exporting, disable that group and the `test sizes and basic rules` helper layer, leaving the area outside the disc and the center hole transparent.
+> 6. **Export a PNG.** Keep **1000 × 1000 pixels**, enable transparency, name the image `cd.png` and place it in the same directory as the audio files.
+>
+> The PSD is for editing; the player reads the exported PNG. Avoid JPG, which cannot preserve the transparent background or center hole. Keep an editable PSD copy for later changes.
 
-**The recommended size is 1000 × 1000 pixels, using a square PNG image.** Other dimensions have not been thoroughly tested and are not guaranteed to produce the same display results. Use the recommended size for consistency. This is a preparation recommendation, not the only size the plugin accepts.
+To display actual disc artwork, follow the steps below. Photoshop is used as an example; basic knowledge of selections, layer masks, and transparent layers is enough. Other image editors supporting these features can also be used.
+
+**The recommended size is 1000 × 1000 pixels, using a square PNG image.** Opaque rectangles are center-cropped to a square and masked to a circle. Images containing transparency are fitted proportionally into a square, keeping transparent holes and padding. Prepared images are capped at 2048 pixels per side; small images are not enlarged during preparation.
 
 1. **Start with a clear disc image**: use a clear CD scan or photograph, preferably taken straight on, without obvious tilt, distortion, or strong reflections. Keep the original file and edit a separate copy.
 2. **Cut out the CD**: use an elliptical selection or layer mask to retain the complete disc and remove the surrounding background. Keep the outer edge smooth, without white or black fringes or jagged edges. Do not include the album cover in the disc image.
 3. **Make the small center hole transparent**: remove only the actual small circular hole. The surrounding plastic hub is part of the disc; preserve its original appearance instead of cutting out the entire center area. Transparency already present in local artwork is retained. The plugin will not cut an extra hole or add a hub ring to that image.
 4. **Prepare the canvas**: crop to a square canvas, center the disc with equal width and height, and resize proportionally to **1000 × 1000 pixels**. Bring the outer edge close to the canvas boundary without clipping it. Avoid excessive transparent margins, which make the displayed disc look smaller. Do not stretch an elliptical disc into a circle or expect enlarging a small image to recover missing detail.
-5. **Export with transparency**: hide or remove unwanted background layers. Confirm that the outer background and center hole show the editor's transparency checkerboard rather than a white background. Keep an editable copy, then export a PNG with transparency enabled and name it `cd.png`. **JPG does not support a transparent background or center hole.** Renaming a JPG file does not convert it into a transparent PNG. The plugin can read JPG files but will not remove their backgrounds automatically.
+5. **Export with transparency**: hide or remove unwanted background layers. Confirm that the outer background and center hole show the editor's transparency checkerboard rather than a white background. Keep an editable copy, then export a PNG with transparency enabled and name it `cd.png`. **JPG does not support a transparent background or center hole.** Renaming a JPG file does not convert it into a transparent PNG. The plugin masks JPG outer corners to transparency, but does not detect the photographed disc, remove backgrounds inside the circle or cut a center hole.
 6. **Place the file and check the result**: put `cd.png` in the song's directory. On Windows, show file extensions to avoid accidentally naming it `cd.png.png`. Inspect the outer edge, center hole, and any remaining fringes against both dark and light backgrounds. Then play a song from that directory and open the secondary display page to check the actual result.
 
 Recommended result: **1000 × 1000 pixels, PNG format, transparent background, transparent small center hole, centered disc, and a complete outer edge without excessive margins**. The search order remains `cd.png → cd.jpg → disc.png → disc.jpg`. To use a lower-priority file, first move any higher-priority image you no longer intend to use out of the same directory.
 
-## Areas for improvement
+## Settings
 
-- **Transitions**: cover enlargement, eject, retract, and track-change animations are implemented. Timing and smoothness during rapid interactions, different return paths, and repeated expansion/collapse can still be improved.
-- **Limited compatibility**: only the SPW version listed above has been tested. Different window sizes, scaling factors, and SPW updates require continued testing.
-- **Limited configuration**: there is no plugin settings page yet. Disc filenames, search order, and display dimensions currently follow fixed settings.
+Open SPW Digital Disc settings in the plugin manager. The host saves and restores these settings.
 
-## v1.0.1 update
+| Setting | Default | Behavior |
+| --- | --- | --- |
+| Disc exposure | 50 | Range 0–100; 0 shows only the cover, 100 moves the entire disc out; controls horizontal travel |
+| Disc in front | Off | Controls overlap order independently of exposure |
+| Rotate while playing | Off | Clockwise, about 20 seconds per turn after ejection; freezes on pause and continues on resume |
 
-- **Fixed transition fallback**: after opening the secondary display from the primary detail page, the CD could eject and then unexpectedly revert to SPW's native album-cover-only view, remaining stuck without ejecting again. The plugin now owns an independent copy of the current song's decoded cover pixels, so native transition-node cleanup or disposal does not revoke the combined display.
-- **Improved display recovery**: recover usable same-song cover sources and recheck Canvas layout readiness when reopening the display.
-- **Release old-song resources**: discard cover copies on track changes, when hiding the page, and when disabling the plugin to prevent stale artwork.
-- Keep local builds and manual `.spmod` uploads as the release process.
+Front mode moves the complete disc with a short uniform fade at entry and exit. Front and back modes share the same travel. At exposure 100, the cover and disc barely overlap, so layer order has little visible effect. The native slider can display decimals; rendering rounds to an integer percentage, so `50.062717` is treated as 50.
 
-## V1.0.0 initial release
+Only the disc rotates; the cover stays upright and the reflection shares the angle. A new track starts upright. Ejection, retraction and exposure 0 do not rotate. Collapsing the secondary page to the mini player freezes the angle; reopening resumes after ejection completes. Returning to the primary page ends that presentation, so entering the secondary page again starts upright. Disabling rotation restores the upright orientation.
 
-Repository release versions start at V1.0.0. This release brings together features implemented during development, including these recent updates:
+## Compatibility and limitations
 
-- **Enlarge first, then eject**: the enlarged cover appears first, then the CD slides out to the right along a smooth curve. The combined reflection moves with it.
-- **Retract before returning**: clicking the secondary display waits for retraction to finish before returning to the primary page. Returning during ejection is supported, and repeated clicks do not queue extra returns.
-- **Eject on track changes**: normal track changes replay ejection while keeping the cover's position and size. Rapid changes are coalesced so only the final stable selection ejects.
-- **Cover source locking**: a new cover takes over after briefly stabilizing, excluding reverse overwrites from old nodes and addressing the flicker path where old and new covers alternate.
-- **Reopening behavior**: reopening after collapsing the secondary page to the playback bar starts a new entry animation once fully expanded, preventing it from finishing while hidden.
-- **Translucent center hub**: when there is no local disc artwork, a CD is generated from the album cover with a fully transparent center hole. The ring retains a silver-gray outline while obscuring less of the artwork. The currently selected ring colors reduce transparency slightly to give the hub a more solid appearance.
+- Adapted to SPW 1.19.0 Microsoft Store. Internal drawing and playback interfaces are checked by class fingerprints; other host versions require adaptation.
+- Disc images are searched only in the audio file's directory using fixed filenames, without recursion, custom paths or automatic downloads.
+- JPG preparation masks the outer circle but does not detect the disc, remove backgrounds inside the circle or create a center hole.
+- If playback state cannot be read, rotation stops and logs `ROTATION_STATE_UNAVAILABLE`; artwork display retains its existing behavior.
+- Window sizes, display scaling and rapid page changes depend on host behavior. Report problems using the repository's Issue templates.
 
-See [CHANGELOG.md](CHANGELOG.md) (Chinese) for detailed updates. Further work includes investigating occasional delays before an old cover refreshes, and improving transitions and compatibility.
+## V1.1.0 changes
 
-V1.0.0 uses P4.10.5 as its code and color baseline. The installation package updates color constants and version information in the existing compiled output, with corresponding source changes included. A full Gradle build was not rerun for this version-packaging step. Instructions for a full build from source follow below.
+- Three independent settings: exposure, front-layer presentation and playback-linked rotation.
+- Improved proportional image fitting, alpha preservation, antialiased edges and generated hub rings; tiny spindle highlight retained.
+- Continuous cover handoff during same-album track changes, with stale disc and asynchronous-result isolation.
+- Verified reuse of unchanged same-directory artwork to reduce reading and decoding.
+- Existing primary page, secondary layout and ejection/retraction timing retained.
+
+See [CHANGELOG.md](CHANGELOG.md) (Chinese) for the full history.
 
 ## Implementation
 
@@ -173,7 +194,7 @@ If using PowerShell, configure the same environment variables and run this in th
 After the build reports `BUILD SUCCESSFUL`, look in the source directory's `dist` folder for:
 
 ```text
-SPW_Digital_Disc_v1.0.1.spmod
+SPW_Digital_Disc_v1.1.0.spmod
 ```
 
 This is the installation package that SPW can import. You do not need to ZIP the entire source directory or rename its extension. The `build` directory contains intermediate build output, not the installation package.

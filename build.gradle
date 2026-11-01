@@ -1,8 +1,8 @@
-// P4.7 Java build route; use the existing JDK25 / Gradle9.8 toolchain.
+// Local Java build route; use the existing JDK25 / Gradle9.8 toolchain.
 // Host dependencies are compileOnly and are never bundled in the plugin.
 plugins { id 'java' }
 group = 'io.github.tigerjx95.spwcd'
-version = '1.0.1'
+version = '1.1.0'
 def host = providers.gradleProperty('saltPlayerArchive')
 java { sourceCompatibility = JavaVersion.VERSION_21; targetCompatibility = JavaVersion.VERSION_21 }
 sourceSets.main.java.srcDirs = ['src']
@@ -18,6 +18,7 @@ tasks.register('plugin', Zip) {
     destinationDirectory = layout.projectDirectory.dir('dist')
     from(layout.buildDirectory.dir('classes/java/main')) { into 'classes' }
     from('MANIFEST.MF') { into 'classes/META-INF' }
+    from('preference_config.json') { into 'classes' }
 }
 tasks.named('plugin') {
     from('LICENSE')

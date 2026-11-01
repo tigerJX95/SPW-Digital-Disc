@@ -50,6 +50,7 @@ public class RootRasterTest {
       }else{graphics.setTransform(state.transform());graphics.setClip(state.clip());}
      }
      case "translate"->graphics.translate((Float)a[0],(Float)a[1]);
+     case "rotate"->graphics.rotate(Math.toRadians((Float)a[0]));
      case "scale"->graphics.scale((Float)a[0],(Float)a[1]);
      case "clipRect-N_I0leg"->graphics.clip(new Rectangle2D.Float((Float)a[0],(Float)a[1],(Float)a[2]-(Float)a[0],(Float)a[3]-(Float)a[1]));
      case "clipPath-mtrdD-E"->{
@@ -87,7 +88,9 @@ public class RootRasterTest {
      }
      case "drawCircle-VaOC9Bg"->{
       circles++;int color=(Integer)toArgb.invoke(null,(Long)a[0]);float radius=(Float)a[1];long pos=(Long)a[2];
-      graphics.setColor(new Color(color,true));graphics.fill(new Ellipse2D.Float(RootRenderer.x(pos)-radius,RootRenderer.y(pos)-radius,2*radius,2*radius));return null;
+      graphics.setColor(new Color(color,true));
+      var circle=new Ellipse2D.Float(RootRenderer.x(pos)-radius,RootRenderer.y(pos)-radius,2*radius,2*radius);
+      if(a[4] instanceof androidx.compose.ui.graphics.drawscope.Stroke stroke){graphics.setStroke(new BasicStroke(Math.max(1,stroke.getWidth())));graphics.draw(circle);}else graphics.fill(circle);return null;
      }
      default->throw new AssertionError("unexpected DrawScope API "+m);
     }
@@ -106,7 +109,7 @@ public class RootRasterTest {
   int cases=0;
   for(int side:new int[]{180,295,420,620}){
    Raster r=new Raster(side*3/2,side);RootRenderer.paint(r.scope,1,r::source,(s,x,y,d)->false,r::path);
-   check(r.sourceCalls==2&&r.circles==7,"cover copy generates CD and seven hub layers behind full cover");
+   check(r.sourceCalls==2&&r.circles==11,"cover copy generates CD and hub, rims and spindle dot behind full cover");
    int p=5;
    check(r.bitmap.getRGB(p,p)==Color.RED.getRGB(),"full cover upper-left preserved");
    check(r.bitmap.getRGB(side-p,p)==Color.GREEN.getRGB(),"full cover upper-right preserved");

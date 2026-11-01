@@ -15,7 +15,7 @@ final class LocalDiscService<T extends AutoCloseable> implements AutoCloseable {
  static final long MAX_PIXELS=16L*1024*1024;
  interface Decoder<T>{T decode(byte[] bytes,int width,int height)throws Exception;}
  interface Draw<T>{void draw(T asset)throws Exception;}
- private record Stamp(Path path,long size,long modified){}
+ private record Stamp(Path path,long size,java.nio.file.attribute.FileTime modified){}
  private final Supplier<String> song;
  private final Decoder<T> decoder;
  private final Runnable changed;
@@ -25,10 +25,14 @@ final class LocalDiscService<T extends AutoCloseable> implements AutoCloseable {
  private String requestedSong,publishedSong,lastDiagnostic="";
  private Stamp publishedStamp;
  private T asset;
+ // One unpublished candidate only. Reuse requires a fresh ordered file lookup;
+ // a song request never makes these retained pixels drawable by itself.
+ private T cachedAsset;
+ private Stamp cachedStamp;
  private String resolvedSong;
  private boolean resolved;
  private volatile boolean closed;
- private long nextScan;
+ private long nextScan,generation;
  LocalDiscService(Supplier<String> song,Decoder<T> decoder,Runnable changed,Consumer<String> log){this.song=song;this.decoder=decoder;this.changed=changed;this.log=log;}
  void start(){
   worker=Executors.newSingleThreadScheduledExecutor(r->{Thread t=new Thread(r,"Reborn-CD-local-image");t.setDaemon(true);return t;});
@@ -64,18 +68,29 @@ final class LocalDiscService<T extends AutoCloseable> implements AutoCloseable {
   while(e.getCause()!=null&&e.getCause()!=e)e=e.getCause();
   return e.getClass().getSimpleName()+": "+String.valueOf(e.getMessage()).replace('\n',' ').replace('\r',' ');
  }
+ // UI song observations invalidate in-flight decode, including A -> B -> A.
+ void request(String current){
+  synchronized(lock){
+   if(closed||Objects.equals(current,requestedSong))return;
+   requestedSong=current;generation++;nextScan=0;
+   if(current==null||current.isBlank()){clearLocked();clearCacheLocked();}
+   else if(asset!=null){
+    clearCacheLocked();cachedAsset=asset;cachedStamp=publishedStamp;
+    asset=null;publishedSong=null;publishedStamp=null;
+   }
+   resolved=false;changed.run();
+  }
+ }
  void poll(){
   if(closed)return;
-  String current=song.get();long now=System.nanoTime();
+  String current=song.get();long now=System.nanoTime(),ticket;
+  request(current);
   synchronized(lock){
-   if(!Objects.equals(current,requestedSong)){
-    requestedSong=current;nextScan=0;clearLocked();resolved=false;changed.run();
-   }
-   if(now<nextScan)return;nextScan=now+TimeUnit.SECONDS.toNanos(1);
+   if(now<nextScan)return;nextScan=now+TimeUnit.SECONDS.toNanos(1);ticket=generation;
   }
   Path directory=directory(current);boolean found=false;
   if(directory==null){
-   finishDefault(current);
+   finishDefault(current,ticket);
    diagnostic("LOCAL_CD_DEFAULT no local song directory; song="+current);return;
   }
   if(directory!=null)for(String name:NAMES){
@@ -83,24 +98,35 @@ final class LocalDiscService<T extends AutoCloseable> implements AutoCloseable {
    Path file=directory.resolve(name);
    try{
     if(!Files.isRegularFile(file))continue;
-    Stamp stamp=new Stamp(file,Files.size(file),Files.getLastModifiedTime(file).toMillis());
-    synchronized(lock){if(Objects.equals(current,publishedSong)&&stamp.equals(publishedStamp)&&asset!=null)return;}
+    Stamp stamp=stamp(file);
+    synchronized(lock){
+     if(closed||ticket!=generation||!Objects.equals(current,requestedSong)||!Objects.equals(current,song.get()))return;
+     if(Objects.equals(current,publishedSong)&&stamp.equals(publishedStamp)&&asset!=null)return;
+     if(cachedAsset!=null&&stamp.equals(cachedStamp)){
+      clearLocked();asset=cachedAsset;cachedAsset=null;cachedStamp=null;
+      publishedSong=current;publishedStamp=stamp;resolvedSong=current;resolved=true;changed.run();return;
+     }
+    }
     byte[] bytes;
     try(InputStream in=Files.newInputStream(file)){
      bytes=in.readNBytes(MAX_BYTES+1);
     }
     int[] dimensions=dimensions(bytes);T decoded=decoder.decode(bytes,dimensions[0],dimensions[1]);
     if(decoded==null)throw new IOException("decoder returned no image");
+    // Do not cache/publish a read that raced with a file replacement.
+    try{if(!stamp.equals(stamp(file)))throw new IOException("image changed while decoding");}
+    catch(Exception error){closeAsset(decoded);throw error;}
     synchronized(lock){
-     if(closed||!Objects.equals(current,requestedSong)||!Objects.equals(current,song.get())){closeAsset(decoded);return;}
-     clearLocked();asset=decoded;publishedSong=current;publishedStamp=stamp;resolvedSong=current;resolved=true;changed.run();
+     if(closed||ticket!=generation||!Objects.equals(current,requestedSong)||!Objects.equals(current,song.get())){closeAsset(decoded);return;}
+     clearLocked();clearCacheLocked();asset=decoded;publishedSong=current;publishedStamp=stamp;resolvedSong=current;resolved=true;changed.run();
     }
     found=true;diagnostic("LOCAL_CD_READY "+file+" "+dimensions[0]+"x"+dimensions[1]);return;
    }catch(Exception|LinkageError e){diagnostic("LOCAL_CD_REJECTED "+file+" "+failure(e));}
   }
-  if(!found)finishDefault(current);
+  if(!found)finishDefault(current,ticket);
   diagnostic("LOCAL_CD_DEFAULT no usable cd.png/cd.jpg/disc.png/disc.jpg; directory="+directory);
  }
+ private static Stamp stamp(Path file)throws IOException{return new Stamp(file,Files.size(file),Files.getLastModifiedTime(file));}
  static int[] dimensions(byte[] bytes)throws IOException{
   byte[] signature={(byte)137,80,78,71,13,10,26,10};
   if(bytes.length>MAX_BYTES||bytes.length<24)throw new IOException("image size limit");
@@ -117,11 +143,11 @@ final class LocalDiscService<T extends AutoCloseable> implements AutoCloseable {
    }finally{reader.dispose();}
   }
  }
- private void finishDefault(String current){
+ private void finishDefault(String current,long ticket){
   synchronized(lock){
-   if(closed||!Objects.equals(current,requestedSong)||!Objects.equals(current,song.get()))return;
+   if(closed||ticket!=generation||!Objects.equals(current,requestedSong)||!Objects.equals(current,song.get()))return;
    boolean notify=!resolved||!Objects.equals(current,resolvedSong)||asset!=null;
-   clearLocked();resolvedSong=current;resolved=true;if(notify)changed.run();
+   clearLocked();clearCacheLocked();resolvedSong=current;resolved=true;if(notify)changed.run();
   }
  }
  // false means lookup completed without usable artwork; true means local image
@@ -147,10 +173,11 @@ final class LocalDiscService<T extends AutoCloseable> implements AutoCloseable {
   diagnostic("LOCAL_CD_DEFAULT image draw failed");
  }
  private void clearLocked(){T previous=asset;asset=null;publishedSong=null;publishedStamp=null;closeAsset(previous);}
+ private void clearCacheLocked(){T previous=cachedAsset;cachedAsset=null;cachedStamp=null;closeAsset(previous);}
  private void closeAsset(T value){if(value!=null)try{value.close();}catch(Exception ignored){}}
  private void diagnostic(String value){if(!value.equals(lastDiagnostic)){lastDiagnostic=value;log.accept(value);}}
  @Override public void close(){
   closed=true;if(worker!=null){worker.shutdownNow();worker=null;}
-  synchronized(lock){clearLocked();changed.run();}
+  synchronized(lock){clearLocked();clearCacheLocked();changed.run();}
  }
 }

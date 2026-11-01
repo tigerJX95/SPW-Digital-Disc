@@ -62,10 +62,10 @@ public class SourceSwitchTest {
   check(source.invoke(frame)==loaded,"late load becomes active source");
   check(!(Boolean)observe.invoke(frame,"album-B/track.flac"),"unchanged source does not schedule continuous redraws");
   failed.setBoolean(frame,true);rejected.setValue(loaded);
-  check((Boolean)observe.invoke(frame,"album-C/track.flac")&&source.invoke(frame)==loaded,"reused native painter recovers on next song");
+  check((Boolean)observe.invoke(frame,"album-C/track.flac")&&source.invoke(frame)==null,"old native painter is quarantined on next song");
   Object placeholder=new Object();HostCoverBridge.loading.add(placeholder);artwork.setValue(placeholder);
   HostCoverBridge.nodes.put(root,List.of(new HostCoverBridge.Image(placeholder,root,620*620),new HostCoverBridge.Image(loaded,root,120*120)));
-  check(source.invoke(frame)==loaded,"large placeholder never outranks smaller decoded cover");
+  check(source.invoke(frame)==null,"placeholder and quarantined old cover cannot start new-song CD");
   System.out.println("PASS track transition recovery: incoming small source, per-song failure reset, late native load wake-up, reused cached source, placeholder exclusion and no redundant refresh");
   System.out.println("PASS secondary-to-primary handoff: native layer invalidation, stable root retained, pass source cleared, readiness reset, late callback cannot reactivate suppression");
   System.out.println("PASS production Frame.source: 100 simulated source changes, stale/closed source rejection, fresh-track recovery and detached-root cleanup");

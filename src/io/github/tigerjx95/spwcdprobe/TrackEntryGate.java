@@ -10,8 +10,9 @@ final class TrackEntryGate {
  boolean observe(String current,long now){
   if(!bound){bound=true;song=current;return false;}
   if(Objects.equals(song,current))return false;
-  song=current;pending=true;changedAt=now;readySeen=false;readySource=null;return true;
+  request(current,now);return true;
  }
+ void request(String current,long now){bound=true;song=current;pending=true;changedAt=now;readySeen=false;readySource=null;}
  boolean ready(String current,Object source,boolean coverReady,boolean discReady,long now){
   if(!pending||!Objects.equals(song,current))return false;
   if(current==null||current.isBlank()||source==null||!coverReady||!discReady){readySeen=false;readySource=null;return false;}

@@ -22,9 +22,12 @@ final class DiscTransition {
  void trackReady(long now){if(phase==Phase.TRACK_WAIT){phase=Phase.OPENING;started=now;}}
  void reset(){phase=Phase.IDLE;exposure=0;scale=1;centered=0;completion=null;}
  void close(long now,Runnable done){
+  close(now,done,true);
+ }
+ void close(long now,Runnable done,boolean visibleDisc){
   if(phase==Phase.CLOSING||phase==Phase.FINISHED)return;
   tick(now);
-  if(phase==Phase.IDLE||phase==Phase.WAITING||phase==Phase.TRACK_WAIT){phase=Phase.FINISHED;exposure=0;scale=1;done.run();return;}
+  if(!visibleDisc||phase==Phase.IDLE||phase==Phase.WAITING||phase==Phase.TRACK_WAIT){phase=Phase.FINISHED;exposure=0;scale=1;done.run();return;}
   completion=done;closeFrom=exposure;closeCentered=centered;started=now;
   duration=(long)(650_000_000L*Math.sqrt(closeFrom));
   // With no exposed pixels there is no return motion to wait for.

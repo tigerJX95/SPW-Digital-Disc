@@ -1,10 +1,10 @@
 Manifest-Version: 1.0
 Plugin-Class: io.github.tigerjx95.spwcdprobe.CdPageProbePlugin
 Plugin-Id: io.github.tigerjx95.spw.digitaldisc
-Plugin-Version: 1.0.1
+Plugin-Version: 1.1.0
 Plugin-Provider: tigerJX95
 Plugin-Name: SPW Digital Disc
 Plugin-Description: Album cover and digital CD display with smooth transitions
-Plugin-Has-Config: false
+Plugin-Has-Config: true
 Plugin-Permissions: class-transform,library-read
 

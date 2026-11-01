@@ -24,6 +24,8 @@ final class DiscImage implements AutoCloseable {
  private final int width,height;
  private DiscImage(Bitmap bitmap){nativeBitmap=bitmap;this.bitmap=SkiaImageAsset_skikoKt.asComposeImageBitmap(bitmap);width=bitmap.getWidth();height=bitmap.getHeight();}
  static DiscImage decode(byte[] bytes,int width,int height)throws Exception{
+  var prepared=DiscArtwork.prepare(bytes,width,height);
+  try{bytes=DiscArtwork.encode(prepared);width=height=prepared.getWidth();}finally{prepared.flush();}
   Bitmap bitmap=null;
   try(Image image=Image.Companion.makeFromEncoded(bytes)){
    if(image.getWidth()!=width||image.getHeight()!=height)throw new IllegalStateException("PNG dimensions changed");

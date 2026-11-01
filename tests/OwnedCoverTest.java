@@ -24,8 +24,10 @@ public class OwnedCoverTest {
    check(copy.getColor(100,100)==0xffc42637,"independent pixels survive native painter and bitmap disposal");
   }
   var observe=type.getDeclaredMethod("observe",String.class);observe.setAccessible(true);observe.invoke(frame,"song B");
-  check(field(type,"ownedCover").get(frame)==null&&copy.isClosed(),"track change releases snapshot and cannot show old song");
-  check(resolve.invoke(frame,new Object[]{null})==null,"next song without a cover never reuses old pixels");
-  System.out.println("PASS actual host mipmap painter capture, native shader/bitmap disposal, 100 detached-node handoffs with intact pixels, original aspect, next-song cleanup and no stale-cover reuse");
+  check(field(type,"ownedCover").get(frame)==null&&field(type,"pendingCover").get(frame)==owned&&!copy.isClosed(),"track change moves snapshot to visual-only waiting state");
+  check(resolve.invoke(frame,new Object[]{null})==owned&&!HostCoverBridge.imageReady(owned),"waiting pixels are not decoded new-track readiness");
+  var clear=type.getDeclaredMethod("clearCover");clear.setAccessible(true);clear.invoke(frame);
+  check(copy.isClosed()&&resolve.invoke(frame,new Object[]{null})==null,"hide/dispose releases waiting pixels");
+  System.out.println("PASS actual host mipmap painter capture, native shader/bitmap disposal, 100 detached-node handoffs with intact pixels, original aspect, visual-only track wait, no early readiness and explicit cleanup");
  }
 }

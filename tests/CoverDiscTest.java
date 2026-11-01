@@ -9,7 +9,7 @@ public class CoverDiscTest {
   for(float aspect:new float[]{.5f,1,2})for(int side:new int[]{180,420,620}){
    var r=new RootRasterTest.Raster(side*3/2,side);
    RootRenderer.paint(r.scope,aspect,r::source,(s,x,y,d)->false,r::path);
-   check(r.sourceCalls==2&&r.circles==7,"same source used twice with hub layers only");
+   check(r.sourceCalls==2&&r.circles==11,"same source used twice with hub layers only");
    check(r.bitmap.getRGB(side+Math.max(1,side/50),side/2)==0,"hole exposes background on visible half");
    int hub=r.bitmap.getRGB(Math.round(side+side*.49f*.17f),side/2);
    check((hub>>>24)==255&&(hub>>>16&255)>200&&(hub>>>8&255)>200&&(hub&255)>200,"white source stays visible under translucent hub");

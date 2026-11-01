@@ -2,12 +2,16 @@ package io.github.tigerjx95.spwcdprobe;
 /** Actual independently measured Canvas bounds. The native cover size is not an input. */
 record SelfDrawLayout(float left,float top,float side,float width,float height,boolean secondary) {
  static SelfDrawLayout fit(float viewportWidth,float viewportHeight,float density,boolean secondary){
+  return fit(viewportWidth,viewportHeight,density,secondary,DiscExposure.DEFAULT);
+ }
+ static SelfDrawLayout fit(float viewportWidth,float viewportHeight,float density,boolean secondary,int amount){
   float padding=24*density,bottom=100*density,topPadding=32*density;
   float paneWidth=secondary?viewportWidth:viewportWidth*.5f;
   float usableHeight=Math.max(0,viewportHeight-bottom-topPadding);
   float wanted=viewportHeight*(secondary?.66f:.45f);
-  float side=Math.max(0,Math.min(wanted,Math.min(usableHeight,(paneWidth-2*padding)/1.5f)));
-  float width=side*1.5f;
+  float factor=DiscExposure.widthFactor(amount);
+  float side=Math.max(0,Math.min(wanted,Math.min(usableHeight,(paneWidth-2*padding)/factor)));
+  float width=side*factor;
   float centerX=secondary?viewportWidth*.5f:viewportWidth*.25f;
   float top=topPadding+(usableHeight-side)*.5f;
   float gap=4*density;

@@ -42,6 +42,10 @@ public class TrackEntryGateTest {
   float closing=motion.pose().exposed();motion.trackChanged();check(motion.closing()&&motion.pose().exposed()==closing,"track change cannot cancel pending return");
   motion.tick(now+6_000_000_000L);check(back.get()==1,"return completes once");
   gate.observe("cancel",now);gate.reset();check(!gate.ready("cancel",art,true,true,now+9_000_000_000L),"unload clears pending request");
+  gate.reset();gate.observe("A",now);
+  gate.request("B",now+1);gate.request("A",now+2);
+  check(!gate.ready("A",art,true,true,now+2),"draw-time ABA starts settle");
+  check(gate.ready("A",art,true,true,now+280_000_002L),"draw-time requests cannot strand TRACK_WAIT between timer ticks");
   System.out.println("PASS latest-only ten-track burst, 280ms quiet interval, one-shot request, three spaced-track ejects, slow decode, stable ready source, fixed cover geometry, stale-song rejection, return protection and reset cancellation");
  }
 }

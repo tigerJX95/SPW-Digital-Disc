@@ -1,0 +1,33 @@
+{
+  "configs": [
+    {
+      "title": "SPW Digital Disc",
+      "config": "config.json",
+      "preferences": [
+        {
+          "type": "seekbar",
+          "key": "disc_exposure",
+          "title": "出碟量",
+          "summary": "0：仅封面；50：默认位置；100：完全移出。前置开启时控制移出距离，返回展示页生效。",
+          "min": 0,
+          "max": 100,
+          "default_value": 50
+        },
+        {
+          "type": "switch",
+          "key": "disc_in_front",
+          "title": "碟片前置展示",
+          "summary": "开启后碟片显示在封面前方。出碟量仍控制向右移出距离；0 时仅显示封面。默认关闭。",
+          "default_value": false
+        },
+        {
+          "type": "switch",
+          "key": "disc_rotation",
+          "title": "播放时旋转碟片",
+          "summary": "默认关闭。出碟完成后约 20 秒转一圈；暂停或收起展示页时停在当前角度，恢复后继续。",
+          "default_value": false
+        }
+      ]
+    }
+  ]
+}

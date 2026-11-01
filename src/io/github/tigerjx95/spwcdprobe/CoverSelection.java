@@ -13,7 +13,9 @@ final class CoverSelection {
  void song(String next){
   if(bound&&Objects.equals(song,next))return;
   if(bound){retired.clear();retired.addAll(seen);retired.addAll(acceptedThisSong);if(committed!=null)retired.add(committed);}
-  bound=true;song=next;candidate=null;acceptedThisSong.clear();
+  // A decoded outgoing painter is not evidence that the new track is ready.
+  // Keep its identity quarantined, but never carry its committed status forward.
+  bound=true;song=next;committed=null;candidate=null;lastAccepted=null;acceptedThisSong.clear();
  }
  Object select(List<Object> ready,Object captured,long now){
   seen=new ArrayList<>(ready);

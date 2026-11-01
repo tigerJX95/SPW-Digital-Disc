@@ -17,3 +17,8 @@ gradle.properties
 *.iml
 Thumbs.db
 .DS_Store
+# Local documentation and validation records
+/docs/
+# Python caches
+__pycache__/
+*.py[cod]
