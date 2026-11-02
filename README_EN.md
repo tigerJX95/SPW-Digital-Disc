@@ -34,7 +34,7 @@ I wanted to bring this digital record experience to Salt Player: enjoying the co
 
 ## Results Showcase
 
-https://github.com/user-attachments/assets/74f35d9a-0656-40d2-9170-b83e0696891a
+https://github.com/user-attachments/assets/8a289172-d79b-4e2e-9ba2-c7dc9ee5d86c
 
 ## Installation and use
 
