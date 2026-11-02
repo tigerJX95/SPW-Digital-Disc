@@ -34,8 +34,8 @@ V1.2.0 优化出收碟缓动与中途返回制动、旋转柔和起转及默认 
 
 ## 效果展示
 
+https://github.com/user-attachments/assets/8a289172-d79b-4e2e-9ba2-c7dc9ee5d86c
 
-https://github.com/user-attachments/assets/74f35d9a-0656-40d2-9170-b83e0696891a
 
 ## 安装与使用
 
