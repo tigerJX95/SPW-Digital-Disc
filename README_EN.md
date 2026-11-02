@@ -99,11 +99,11 @@ Only the disc rotates; the cover stays upright and the reflection shares the ang
 
 ## SPW host compatibility
 
-| SPW host | Interface mapping | V1.1.1 offline regression | Real-machine status |
-| --- | --- | --- | --- |
-| 1.19.0 Microsoft Store | Adapted | 35 programs pass | V1.1.0 passed; V1.1.1 pending |
-| 1.19.3 Microsoft Store | Adapted | 35 programs pass | V1.1.1 pending |
-| Other versions or distributions | Unverified | Unverified | Unverified |
+| SPW host | Interface mapping | V1.1.1 offline regression |
+| --- | --- | --- |
+| 1.19.0 Microsoft Store | Adapted | 35 programs pass |
+| 1.19.3 Microsoft Store | Adapted | 35 programs pass |
+| Other versions or distributions | Unverified | Unverified |
 
 Offline tests cover interface resolution, cover calls, configuration storage, images, animations and rotation state. They do not run Windows native playback or Skia rendering. Startup matches a complete profile by actual class fingerprints, rather than Windows 10/11 or channel labels alone. Unknown interfaces prevent activation with a detailed error. Rotation stops and logs a warning if its playback-state checks fail.
 
