@@ -38,7 +38,7 @@ public class RevealOrderTest {
   check(!service.drawResolved(song.get(),x->{}),"only confirmed absence returns default");
   RootRasterTest.Raster missing=new RootRasterTest.Raster(630,420);
   RootRenderer.paint(missing.scope,1,missing::source,(scope,x,y,d)->service.drawResolved(song.get(),v->{}),missing::path);
-  check(missing.circles==11&&missing.sourceCalls==2,"confirmed missing generates cover disc with hub only");
+  check(missing.circles==9&&missing.sourceCalls==2,"confirmed missing generates cover disc with hub only");
   song.set(null);check(service.drawResolved(null,x->{throw new AssertionError();}),"temporary unavailable path never draws silver");
   service.close();System.out.println("PASS placeholder/empty cover rejected, actual host shader contract, pending cover-only render, 100 slow-decode frames without silver/old disc, confirmed missing fallback, unavailable path suppression");
   System.out.println("Offline integration test; native Windows transition timing is outside its scope.");

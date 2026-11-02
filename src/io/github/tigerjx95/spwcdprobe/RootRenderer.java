@@ -1,5 +1,6 @@
 package io.github.tigerjx95.spwcdprobe;
 import androidx.compose.ui.graphics.Canvas;
+import androidx.compose.ui.graphics.Brush;
 import androidx.compose.ui.graphics.ColorFilter;
 import androidx.compose.ui.graphics.ColorKt;
 import androidx.compose.ui.graphics.Path;
@@ -9,19 +10,28 @@ import java.util.function.Supplier;
 import androidx.compose.ui.graphics.drawscope.*;
 import androidx.compose.ui.graphics.painter.Painter;
 import java.lang.reflect.Method;
+import java.lang.reflect.Constructor;
 /** Draws into our own full-width Canvas. Never invoked inside the native Image node. */
 final class RootRenderer {
  interface Source {void draw(DrawScope scope,float width,float height)throws Exception;}
  interface Disc {boolean draw(DrawScope scope,float cx,float cy,float diameter)throws Exception;}
- private static final Method CLIP,CLIP_RECT,CIRCLE,SIZE,INTRINSIC,DRAW;
+ private static final Method CLIP,CLIP_RECT,CIRCLE,BRUSH_CIRCLE,RADIAL,LINEAR,BOX_COLOR,SIZE,INTRINSIC,DRAW;
+ private static final Constructor<Stroke> STROKE;
+ private record Finish(float radius,Stroke line,Stroke edge,Brush hub,Brush metal,Brush innerLip,Stroke bevel,Stroke lip){}
+ private static volatile Finish cachedFinish;
  static {
   try{
    CLIP_RECT=Canvas.class.getMethod("clipRect-N_I0leg",float.class,float.class,float.class,float.class,int.class);
    CLIP=Canvas.class.getMethod("clipPath-mtrdD-E",Path.class,int.class);
    CIRCLE=DrawScope.class.getMethod("drawCircle-VaOC9Bg",long.class,float.class,long.class,float.class,DrawStyle.class,ColorFilter.class,int.class);
+   BRUSH_CIRCLE=DrawScope.class.getMethod("drawCircle-V9BoPsw",Brush.class,float.class,long.class,float.class,DrawStyle.class,ColorFilter.class,int.class);
+   RADIAL=Brush.Companion.getClass().getMethod("radialGradient-P_Vx-Ks",kotlin.Pair[].class,long.class,float.class,int.class);
+   LINEAR=Brush.Companion.getClass().getMethod("linearGradient-mHitzGk",kotlin.Pair[].class,long.class,long.class,int.class);
+   BOX_COLOR=androidx.compose.ui.graphics.Color.class.getMethod("box-impl",long.class);
    SIZE=DrawScope.class.getMethod("getSize-NH-jbRc");
    INTRINSIC=Painter.class.getMethod("getIntrinsicSize-NH-jbRc");
    DRAW=Painter.class.getMethod("draw-x_KDEd0",DrawScope.class,long.class,float.class,ColorFilter.class);
+   STROKE=Stroke.class.getConstructor(float.class,float.class,int.class,int.class,androidx.compose.ui.graphics.PathEffect.class,kotlin.jvm.internal.DefaultConstructorMarker.class);
   }catch(Exception e){throw new ExceptionInInitializerError(e);}
  }
  static void draw(DrawScope scope,Object painter,Runnable enter,Runnable leave,Disc disc)throws Exception{
@@ -94,23 +104,72 @@ final class RootRenderer {
     float dw=aspect>=1?r*2*aspect:r*2,dh=aspect>=1?r*2:r*2/aspect;
     canvas.save();
     try{canvas.translate(cx-dw*.5f,cy-dh*.5f);source.draw(scope,dw,dh);}finally{canvas.restore();}
-    // Translucent hub layers preserve the underlying artwork. The small hole remains fully clear.
-    float[] rings={.22f,.208f,.195f,.183f,.161f,.148f,.136f};
-    int[] colors={0x130b1721,0x40d9dfe3,0x13707d87,0x1cbbc4cb,0x1ce4e9ed,0x1378858f,0x25c6cfd6};
-    for(int i=0;i<rings.length;i++)CIRCLE.invoke(scope,ColorKt.Color(colors[i]),r*rings[i],pack(cx,cy),1f,Fill.INSTANCE,null,3);
-    // Fine specular rims give definition without an opaque backing over artwork.
-    Stroke rim=new Stroke();
-    CIRCLE.invoke(scope,ColorKt.Color(0x55ffffff),r-.75f,pack(cx,cy),1f,rim,null,3);
-    CIRCLE.invoke(scope,ColorKt.Color(0x300b1721),Math.max(0,r-1.75f),pack(cx,cy),1f,rim,null,3);
-    CIRCLE.invoke(scope,ColorKt.Color(0x66eff3f5),r*.22f,pack(cx,cy),1f,rim,null,3);
+    finish(scope,r,pack(cx,cy));
    }finally{canvas.restore();}
-   // Keep the tiny spindle highlight; the surrounding center hole stays clear.
+   // A faint translucent film keeps the background visible through the hole.
+   CIRCLE.invoke(scope,ColorKt.Color(0x18ffffff),r*.125f,pack(cx,cy),1f,Fill.INSTANCE,null,3);
+   // Keep the tiny spindle highlight.
    CIRCLE.invoke(scope,ColorKt.Color(0xccffffff),Math.max(.65f,r*.0075f),pack(cx,cy),1f,Fill.INSTANCE,null,3);
   }
    }finally{moving.restore();if(blended)moving.restore();}
    }
   }finally{moving.restore();}
   if(!front)cover(scope,aspect,source,side);
+ }
+ private static Stroke stroke(float width)throws Exception{return STROKE.newInstance(width,4f,0,0,null,null);}
+ private static Brush hub(float r)throws Exception{
+  // Narrow dark groove / bright lip pairs, with a milky translucent inner bevel.
+  // Radial proportions stay fixed: no enlarged hub or thicker concentric outlines.
+  float[] stops={0,.568f,.580f,.603f,.628f,.66f,.72f,.82f,.90f,.930f,.948f,.960f,.976f,.987f,1};
+  int[] colors={0x00ffffff,0xa8f3f4f2,0xc8ffffff,0xb0f0f1ee,0x989ea8aa,0x90e5e7e3,0x78e5e7e4,0x70dbe1e2,0x88d3dce0,0xb064737e,0xe8f5f7f6,0xe03f4e59,0xf0eef3f5,0xd8ffffff,0x80505e67};
+  kotlin.Pair<?,?>[] values=new kotlin.Pair<?,?>[stops.length];
+  for(int i=0;i<stops.length;i++)values[i]=new kotlin.Pair<>(stops[i],BOX_COLOR.invoke(null,ColorKt.Color(colors[i])));
+  return (Brush)RADIAL.invoke(Brush.Companion,values,pack(0,0),r*.22f,0);
+ }
+ private static Brush metal(float r)throws Exception{
+  // Directional reflections: a restrained cool/warm pair flanking a white glint.
+  float[] stops={0,.18f,.34f,.46f,.53f,.62f,.78f,1};
+  int[] colors={0xa03c4b58,0xd8f7fafb,0x907f9cac,0xb8d4bd8d,0xe8ffffff,0x90495661,0xd8e8f1f7,0x98616c72};
+  kotlin.Pair<?,?>[] values=new kotlin.Pair<?,?>[stops.length];
+  for(int i=0;i<stops.length;i++)values[i]=new kotlin.Pair<>(stops[i],BOX_COLOR.invoke(null,ColorKt.Color(colors[i])));
+  return (Brush)LINEAR.invoke(Brush.Companion,values,pack(-r*.18f,-r*.13f),pack(r*.18f,r*.13f),0);
+ }
+ private static Brush innerLip(float r)throws Exception{
+  // A broad, low-contrast molded lip catches light opposite the metal edge.
+  float[] stops={0,.3f,.55f,.78f,1};
+  int[] colors={0x405c6970,0x30c8d0cf,0x60f1f2ee,0xa8ffffff,0x80e8ece9};
+  kotlin.Pair<?,?>[] values=new kotlin.Pair<?,?>[stops.length];
+  for(int i=0;i<stops.length;i++)values[i]=new kotlin.Pair<>(stops[i],BOX_COLOR.invoke(null,ColorKt.Color(colors[i])));
+  return (Brush)LINEAR.invoke(Brush.Companion,values,pack(-r*.10f,-r*.10f),pack(r*.10f,r*.10f),0);
+ }
+ private static void finish(DrawScope scope,float r,long center)throws Exception{
+  Finish style=cachedFinish;
+  if(style==null||style.radius()!=r){
+   float line=Math.max(.6f,Math.min(1.2f,r*.004f));
+   cachedFinish=style=new Finish(r,stroke(line),stroke(Math.max(1.2f,Math.min(5f,r*.018f))),hub(r),metal(r),innerLip(r),stroke(r*.005f),stroke(r*.012f));
+  }
+  float line=style.line().getWidth();
+  // White optical edge sits wholly inside the original disc silhouette.
+  float edge=style.edge().getWidth();
+  circle(scope,0xeefafcfd,r-edge*.5f,center,style.edge());
+  circle(scope,0xafffffff,r-line*.5f,center,style.line());
+  circle(scope,0x236b7480,Math.max(0,r-edge-line*.3f),center,style.line());
+  // Soft translucent bevel replaces discrete nested outlines. Keep the brush
+  // at a local origin so it can be reused while the disc moves across the page.
+  Canvas canvas=scope.getDrawContext().getCanvas();canvas.save();
+  try{
+   canvas.translate(x(center),y(center));
+   BRUSH_CIRCLE.invoke(scope,style.hub(),r*.22f,pack(0,0),1f,Fill.INSTANCE,null,3);
+   BRUSH_CIRCLE.invoke(scope,style.metal(),r*.210f,pack(0,0),1f,style.bevel(),null,3);
+   // Reverse the adjacent polished lip so bright and dark edges separate.
+   canvas.rotate(180f);
+   BRUSH_CIRCLE.invoke(scope,style.metal(),r*.216f,pack(0,0),1f,style.bevel(),null,3);
+   canvas.rotate(-180f);
+   BRUSH_CIRCLE.invoke(scope,style.innerLip(),r*.134f,pack(0,0),1f,style.lip(),null,3);
+  }finally{canvas.restore();}
+ }
+ private static void circle(DrawScope scope,int color,float radius,long center,Stroke style)throws Exception{
+  CIRCLE.invoke(scope,ColorKt.Color(color),radius,center,1f,style,null,3);
  }
  private static void cover(DrawScope scope,float aspect,Source source,float side)throws Exception{
   // Complete source fitted proportionally into its own square, drawn over CD.

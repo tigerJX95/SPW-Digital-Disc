@@ -5,8 +5,10 @@ final class DiscTransition {
  enum Phase { IDLE, WAITING, TRACK_WAIT, COVER, OPENING, OPEN, CLOSING, FINISHED }
  record Pose(float exposed,float scale,float centered) {}
  private Phase phase=Phase.IDLE;
- private long started,duration;
+ private long started,duration,brakeDuration;
  private float exposure,scale=1,closeFrom,centered,closeCentered;
+ private float brakeFrom,brakeCentered;
+ private double brakeVelocity;
  private boolean pageEntry;
  private Runnable completion;
  Phase phase(){return phase;}
@@ -20,7 +22,7 @@ final class DiscTransition {
   phase=Phase.TRACK_WAIT;exposure=0;scale=1;centered=0;pageEntry=false;completion=null;
  }
  void trackReady(long now){if(phase==Phase.TRACK_WAIT){phase=Phase.OPENING;started=now;}}
- void reset(){phase=Phase.IDLE;exposure=0;scale=1;centered=0;completion=null;}
+ void reset(){phase=Phase.IDLE;exposure=0;scale=1;centered=0;completion=null;brakeDuration=0;brakeVelocity=0;}
  void close(long now,Runnable done){
   close(now,done,true);
  }
@@ -28,8 +30,21 @@ final class DiscTransition {
   if(phase==Phase.CLOSING||phase==Phase.FINISHED)return;
   tick(now);
   if(!visibleDisc||phase==Phase.IDLE||phase==Phase.WAITING||phase==Phase.TRACK_WAIT){phase=Phase.FINISHED;exposure=0;scale=1;done.run();return;}
-  completion=done;closeFrom=exposure;closeCentered=centered;started=now;
-  duration=(long)(650_000_000L*Math.sqrt(closeFrom));
+  completion=done;
+  // Preserve outgoing velocity on an interrupted eject. A short braking
+  // segment stops inside the original endpoint before the return begins.
+  brakeFrom=exposure;brakeCentered=centered;brakeDuration=0;brakeVelocity=0;
+  if(phase==Phase.OPENING&&exposure>0&&exposure<1){
+   double u=unit(now-started,700_000_000L);
+   brakeVelocity=30*u*u*(1-u)*(1-u)/.7; // Exposure units per second.
+   if(brakeVelocity>0){
+    double seconds=Math.min(Math.min(.08,Math.max(0,now-started)/1_000_000_000.0),3*(1-exposure)/brakeVelocity);
+    brakeDuration=(long)(seconds*1_000_000_000L);
+   }
+  }
+  closeFrom=Math.min(1,brakeFrom+(float)(brakeVelocity*brakeDuration/3_000_000_000.0));
+  closeCentered=pageEntry?Math.max(0,brakeCentered-(closeFrom-brakeFrom)):brakeCentered;
+  started=now;duration=(long)(650_000_000L*Math.sqrt(closeFrom));
   // With no exposed pixels there is no return motion to wait for.
   if(closeFrom==0){finish();return;}
   phase=Phase.CLOSING;
@@ -41,12 +56,20 @@ final class DiscTransition {
    if(t>=1){phase=Phase.OPENING;started+=240_000_000L;}
   }
   if(phase==Phase.OPENING){
-   // ReBORN's progressive entry: 700 ms smoothstep, quiet at both ends.
-   float t=unit(now-started,700_000_000L);exposure=smooth(t);scale=1;centered=pageEntry?1-exposure:0;
+   // Quintic easing keeps velocity and acceleration quiet at both endpoints.
+   float t=unit(now-started,700_000_000L);exposure=smoother(t);scale=1;centered=pageEntry?1-exposure:0;
    if(t>=1){phase=Phase.OPEN;exposure=1;}
   }else if(phase==Phase.CLOSING){
-   float t=unit(now-started,duration);exposure=closeFrom*(1-smooth(t));centered=closeCentered+(1-closeCentered)*smooth(t);
-   if(t>=1)finish();
+   long elapsed=now-started;
+   if(elapsed<brakeDuration){
+    double u=unit(elapsed,brakeDuration);
+    exposure=Math.min(closeFrom,brakeFrom+(float)(brakeVelocity*brakeDuration/1_000_000_000.0*(u-u*u+u*u*u/3)));
+    centered=pageEntry?Math.max(0,brakeCentered-(exposure-brakeFrom)):brakeCentered;
+   }else{
+    float t=unit(elapsed-brakeDuration,duration),eased=smoother(t);
+    exposure=closeFrom*(1-eased);centered=closeCentered+(1-closeCentered)*eased;
+    if(t>=1)finish();
+   }
   }
   return old!=exposure||oldScale!=scale||oldCentered!=centered||before!=phase;
  }
@@ -56,6 +79,5 @@ final class DiscTransition {
   if(done!=null)done.run();
  }
  private static float unit(long elapsed,long duration){return duration<=0?1:Math.max(0,Math.min(1,(float)((double)elapsed/duration)));}
- private static float smooth(float t){return t*t*(3-2*t);}
- private static float smoother(float t){return t*t*t*(t*(t*6-15)+10);}
+ private static float smoother(float t){double u=t;return (float)Math.max(0,Math.min(1,u*u*u*(u*(u*6-15)+10)));}
 }

@@ -23,7 +23,7 @@ public class RotationRendererTest {
     else if(zero.bitmap.getRGB(x,y)!=half.bitmap.getRGB(x,y))changed++;
    }
    check(changed>500,"only disc artwork changes orientation");
-   check((half.bitmap.getRGB(360,125)>>>24)==0,"center hole transparent after rotation");
+   check((half.bitmap.getRGB(360,125)>>>24)==(local?0:24),"center hole retains expected alpha after rotation");
    if(!local)check((half.bitmap.getRGB(360,120)>>>24)>0,"tiny white spindle retained");
   }
   for(boolean front:new boolean[]{false,true})for(boolean local:new boolean[]{false,true}){

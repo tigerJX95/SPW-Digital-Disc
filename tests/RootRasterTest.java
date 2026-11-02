@@ -86,6 +86,33 @@ public class RootRasterTest {
       int sx=(int)(so>>>32),sy=(int)so,sw=(int)(ss>>>32),sh=(int)ss,dx=(int)(dest>>>32),dy=(int)dest,dw=(int)(ds>>>32),dh=(int)ds;
       graphics.drawImage(image,dx,dy,dx+dw,dy+dh,sx,sy,sx+sw,sy+sh,null);return null;
      }
+     case "drawCircle-V9BoPsw"->{
+      circles++;
+      if(a[0] instanceof androidx.compose.ui.graphics.LinearGradient brush){
+       long start=(Long)brush.getClass().getMethod("getStart-F1C5BW0$ui_graphics").invoke(brush),end=(Long)brush.getClass().getMethod("getEnd-F1C5BW0$ui_graphics").invoke(brush);
+       var stops=brush.getStops$ui_graphics();var colors=brush.getColors$ui_graphics();
+       float[] fractions=new float[stops.size()];Color[] palette=new Color[colors.size()];
+       var unbox=androidx.compose.ui.graphics.Color.class.getMethod("unbox-impl");
+       for(int i=0;i<stops.size();i++){fractions[i]=stops.get(i);palette[i]=new Color((Integer)toArgb.invoke(null,unbox.invoke(colors.get(i))),true);}
+       var previous=graphics.getPaint();var previousStroke=graphics.getStroke();
+       graphics.setPaint(new LinearGradientPaint(RootRenderer.x(start),RootRenderer.y(start),RootRenderer.x(end),RootRenderer.y(end),fractions,palette));
+       long at=(Long)a[2];float drawn=(Float)a[1];
+       graphics.setStroke(new BasicStroke(((androidx.compose.ui.graphics.drawscope.Stroke)a[4]).getWidth()));
+       graphics.draw(new Ellipse2D.Float(RootRenderer.x(at)-drawn,RootRenderer.y(at)-drawn,drawn*2,drawn*2));
+       graphics.setPaint(previous);graphics.setStroke(previousStroke);return null;
+      }
+      if(a[4]!=Fill.INSTANCE||(Integer)a[6]!=3)throw new AssertionError("radial hub requires Fill and SrcOver");
+      var brush=(androidx.compose.ui.graphics.RadialGradient)a[0];
+      long center=(Long)brush.getClass().getMethod("getCenter-F1C5BW0$ui_graphics").invoke(brush);
+      float radius=brush.getRadius$ui_graphics();var stops=brush.getStops$ui_graphics();var colors=brush.getColors$ui_graphics();
+      float[] fractions=new float[stops.size()];Color[] palette=new Color[colors.size()];
+      var unbox=androidx.compose.ui.graphics.Color.class.getMethod("unbox-impl");
+      for(int i=0;i<stops.size();i++){fractions[i]=stops.get(i);palette[i]=new Color((Integer)toArgb.invoke(null,unbox.invoke(colors.get(i))),true);}
+      var previous=graphics.getPaint();
+      graphics.setPaint(new RadialGradientPaint(RootRenderer.x(center),RootRenderer.y(center),radius,fractions,palette));
+      long at=(Long)a[2];float drawn=(Float)a[1];graphics.fill(new Ellipse2D.Float(RootRenderer.x(at)-drawn,RootRenderer.y(at)-drawn,drawn*2,drawn*2));
+      graphics.setPaint(previous);return null;
+     }
      case "drawCircle-VaOC9Bg"->{
       circles++;int color=(Integer)toArgb.invoke(null,(Long)a[0]);float radius=(Float)a[1];long pos=(Long)a[2];
       graphics.setColor(new Color(color,true));
@@ -109,7 +136,7 @@ public class RootRasterTest {
   int cases=0;
   for(int side:new int[]{180,295,420,620}){
    Raster r=new Raster(side*3/2,side);RootRenderer.paint(r.scope,1,r::source,(s,x,y,d)->false,r::path);
-   check(r.sourceCalls==2&&r.circles==11,"cover copy generates CD and hub, rims and spindle dot behind full cover");
+   check(r.sourceCalls==2&&r.circles==9,"cover copy generates CD with white rim, translucent bevel and spindle dot");
    int p=5;
    check(r.bitmap.getRGB(p,p)==Color.RED.getRGB(),"full cover upper-left preserved");
    check(r.bitmap.getRGB(side-p,p)==Color.GREEN.getRGB(),"full cover upper-right preserved");

@@ -22,12 +22,12 @@ subprocess.run([str(javac), '--release', '21', '-encoding', 'UTF-8', '-cp', clas
                 '-d', str(output), *map(str, sorted(root.glob('tests/*.java')))], check=True)
 classpath = os.pathsep.join(map(str, [output, classes, host]))
 tests = [
-    'CoverSelectionTest', 'CoverRecoveryTest', 'DiscTransitionTest', 'TrackEntryGateTest',
+    'CoverSelectionTest', 'CoverRecoveryTest', 'DiscTransitionTest', 'TrackEntryGateTest', 'GeneratedDiscFinishTest',
     'LocalDiscServiceTest', 'LocalDiscFixTest', 'DiscArtworkTest', 'DiscGenerationTest', 'LocalDiscReuseTest',
-    'ProductionResumeTest', 'ProductionLayoutRecoveryTest', 'ObservableHandoffTest',
+    'ProductionResumeTest', 'ProductionLayoutRecoveryTest', 'ObservableHandoffTest', 'ProductionRotationHandoffTest',
     'HostEntryTest', 'HostImageDrawTest', 'RootRasterTest', 'CoverDiscTest',
     'LocalDiscRasterTest', 'DiscMotionRasterTest', 'ReflectionTest', 'RevealOrderTest',
-    'RevealCycleTest', 'DiscExposureTest', 'DiscSettingsTest', 'PreferenceSchemaTest', 'FrontSettingsTest', 'FrontRendererTest', 'FrontDiscMotionTest', 'DiscRotationTest', 'RotationSettingsTest', 'RotationRendererTest', 'HostCompatibilityTest', 'PluginSourceMetadataTest', 'HostBindingsTest',
+    'RevealCycleTest', 'DiscExposureTest', 'DiscSettingsTest', 'PreferenceSchemaTest', 'FrontSettingsTest', 'FrontRendererTest', 'FrontDiscMotionTest', 'DiscRotationTest', 'RotationSettingsTest', 'RotationRendererTest', 'DiscMotionContinuityTest', 'TimedDiscMotionRasterTest', 'RotationHandoffTest', 'HostCompatibilityTest', 'PluginSourceMetadataTest', 'HostBindingsTest',
 ]
 qa = root / 'build/qa'
 qa.mkdir(parents=True, exist_ok=True)
@@ -46,5 +46,5 @@ subprocess.run([str(javac), '--release', '21', '-encoding', 'UTF-8', '-cp', clas
                 '-d', str(handoff), *map(str, sorted(root.glob('tests/handoff-double/*.java')))], check=True)
 subprocess.run([str(java), '-Djava.awt.headless=true', '-cp', os.pathsep.join(map(str, [handoff, classes, host])),
                 'io.github.tigerjx95.spwcdprobe.ContinuousCoverTest'], check=True)
-print('PASS: 35 offline regression programs. OwnedCoverTest requires a matching native Skiko backend and is not run here.')
+print(f'PASS: {len(tests)+2} offline regression programs. OwnedCoverTest requires a matching native Skiko backend and is not run here.')
 print('Offline scope excludes Windows SPW playback and native Skia decode.')

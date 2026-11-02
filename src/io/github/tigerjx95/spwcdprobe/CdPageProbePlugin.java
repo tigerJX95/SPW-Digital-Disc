@@ -62,6 +62,11 @@ public final class CdPageProbePlugin extends SpwPlugin {
   final MutableState<Boolean> trackPending=state(false);
   final DiscTransition motion=new DiscTransition();
   final MutableState<DiscTransition.Pose> pose=state(motion.pose());
+  void freezeRotation(long now){rotationAngle.setValue(rotation.freeze(now));}
+  void closeMotion(long now,Runnable done,boolean visibleDisc){
+   freezeRotation(now);
+   motion.close(now,done,visibleDisc);pose.setValue(motion.pose());
+  }
   String lastBoundsError="";
   DiscImage ownedCover,pendingCover;
   Object ownedSource,lastCaptureFailure;
@@ -129,7 +134,7 @@ public final class CdPageProbePlugin extends SpwPlugin {
   void syncVisibility(boolean visible){
    RevealCycle.Edge edge=revealCycle.sample(visible);
    if(edge==RevealCycle.Edge.NONE)return;
-   if(edge==RevealCycle.Edge.HIDDEN)clearCover();
+   if(edge==RevealCycle.Edge.HIDDEN){freezeRotation(System.nanoTime());clearCover();}
    // No old pass, pending return or track request may leak into the next presentation.
    motion.reset();trackGate.reset();trackPending.setValue(false);retainingReturn.setValue(false);
    passPainter.setValue(null);suppressionApplied=false;
@@ -159,6 +164,7 @@ public final class CdPageProbePlugin extends SpwPlugin {
    coverSelection.song(song);
    boolean changed=!Objects.equals(song,observedSong);
    if(changed){
+    rotation.reset();rotationAngle.setValue(0f);
     boolean previouslyObserved=observedSong!=null;
     if(song!=null&&!song.isBlank())awaitCover();else clearCover();
     observedSong=song;failed=false;rejectedSource.setValue(null);artwork.setValue(null);
@@ -216,7 +222,7 @@ public final class CdPageProbePlugin extends SpwPlugin {
    // layout nodes must not be traversed by the local-image decode worker.
    sourceObserver=new javax.swing.Timer(100,event->observeSources());sourceObserver.start();
    animationClock=new javax.swing.Timer(16,event->animateFrames());animationClock.setCoalesce(true);animationClock.start();
-   report("START 1.1.1 Host Compatibility; retained pixels are not readiness; hooks="+handles.size());
+   report("START 1.2.0 Generated Disc Finish; retained pixels are not readiness; hooks="+handles.size());
   }catch(Throwable e){stop();throw new IllegalStateException("SelfDraw startup failed",e);}
  }
  @SuppressWarnings("unchecked")
@@ -237,7 +243,7 @@ public final class CdPageProbePlugin extends SpwPlugin {
   // Retain the secondary visual until its disc is fully retracted.
   if(lyrics&&frame.secondary&&!frame.motion.finished()){
    frame.retainingReturn.setValue(true);
-   frame.motion.close(System.nanoTime(),()->frame.retainingReturn.setValue(false),amount>0);frame.pose.setValue(frame.motion.pose());
+   frame.closeMotion(System.nanoTime(),()->frame.retainingReturn.setValue(false),amount>0);
   }
   boolean visualLyrics=lyrics&&!frame.retainingReturn.getValue();
   if(visualLyrics)frame.restoreNative();
@@ -246,10 +252,10 @@ public final class CdPageProbePlugin extends SpwPlugin {
   Function0<Unit> animatedToggle=()->{
    if(frame.secondary&&(frame.motion.closing()||frame.motion.finished()))return Unit.INSTANCE;
    if(!frame.secondary||!frame.suppressionApplied){nativeToggle.invoke();return Unit.INSTANCE;}
-   frame.motion.close(System.nanoTime(),()->{
+   frame.closeMotion(System.nanoTime(),()->{
     frame.pose.setValue(frame.motion.pose());nativeToggle.invoke();
    },amount>0);
-   frame.pose.setValue(frame.motion.pose());return Unit.INSTANCE;
+   return Unit.INSTANCE;
   };
   boolean active=frame.presentationVisible();
   frame.syncVisibility(active);
