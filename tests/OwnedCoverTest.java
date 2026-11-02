@@ -8,7 +8,7 @@ public class OwnedCoverTest {
  static Field field(Class<?> type,String name)throws Exception{var f=type.getDeclaredField(name);f.setAccessible(true);return f;}
  public static void main(String[] args)throws Exception{
   Bitmap bitmap=new Bitmap();check(bitmap.allocN32Pixels(512,256,false),"allocate host bitmap");bitmap.erase(0xffc42637);
-  var painterType=Class.forName("androidx.compose.ui.ƙ");var pctor=painterType.getDeclaredConstructor(Bitmap.class);pctor.setAccessible(true);
+  var painterType=Class.forName(HostCompatibility.current().painter());var pctor=painterType.getDeclaredConstructor(Bitmap.class);pctor.setAccessible(true);
   Object painter=pctor.newInstance(bitmap);check(HostCoverBridge.imageReady(painter),"actual host mipmap painter ready");
   var plugin=new CdPageProbePlugin(new PluginContext("test","1.0.1",".","1.19.0",Channel.MS));
   var type=Class.forName(CdPageProbePlugin.class.getName()+"$Frame");var ctor=type.getDeclaredConstructors()[0];ctor.setAccessible(true);Object frame=ctor.newInstance(plugin);

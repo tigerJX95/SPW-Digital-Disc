@@ -12,7 +12,7 @@ public class RevealOrderTest {
   Cover cover=new Cover();check(!HostCoverBridge.imageReady(cover),"empty image field is not ready");
   cover.bitmap=(ImageBitmap)Proxy.newProxyInstance(ImageBitmap.class.getClassLoader(),new Class[]{ImageBitmap.class},(p,m,a)->null);
   check(!HostCoverBridge.imageReady(cover),"resource bitmaps cannot prove actual album readiness");
-  boolean shader=false;for(var f:Class.forName("androidx.compose.ui.ƙ").getDeclaredFields())if(f.getType()==org.jetbrains.skia.Shader.class)shader=true;
+  boolean shader=false;for(var f:Class.forName(HostCompatibility.current().painter()).getDeclaredFields())if(f.getType()==org.jetbrains.skia.Shader.class)shader=true;
   check(shader,"actual host mipmap painter matches readiness contract");
   Path root=Files.createTempDirectory("cd-reveal"),a=Files.createDirectory(root.resolve("A")),b=Files.createDirectory(root.resolve("B"));
   Path songA=Files.write(a.resolve("a.flac"),new byte[]{1}),songB=Files.write(b.resolve("b.flac"),new byte[]{1});

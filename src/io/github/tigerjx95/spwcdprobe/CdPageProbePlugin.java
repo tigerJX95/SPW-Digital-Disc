@@ -15,13 +15,13 @@ import kotlin.Unit;
 import kotlin.jvm.functions.Function0;
 import java.lang.ref.WeakReference;
 import java.nio.file.*;
-import java.security.MessageDigest;
 import java.time.Instant;
 import java.util.*;
 
 /** Replaces the cover DISPLAY layer with a separately measured sibling Canvas. */
 public final class CdPageProbePlugin extends SpwPlugin {
- private static final String OWNER="androidx.compose.ui.א",METHOD="\u037f";
+ private static final String METHOD="\u037f";
+ private HostBindings host;
  private final List<HookHandle> handles=new ArrayList<>();
  private final List<WeakReference<Frame>> frames=new ArrayList<>();
  private final MutableState<Boolean> enabled=state(false);
@@ -187,15 +187,15 @@ public final class CdPageProbePlugin extends SpwPlugin {
  }
  @Override public synchronized void start(){
   if(running)return;
-  if(!"1.19.0".equals(getPluginContext().getSpwVersion())||getPluginContext().getSpwChannel()!=Channel.MS)throw new IllegalStateException("Requires SPW 1.19.0 MS");
+  report("HOST_DETECTED version="+getPluginContext().getSpwVersion()+" channel="+getPluginContext().getSpwChannel()+" os="+System.getProperty("os.name")+" java="+System.getProperty("java.version"));
+  try{host=new HostBindings(HostCompatibility.verify(getPluginContext(),getClass().getClassLoader()),getClass().getClassLoader());report("HOST_PROFILE "+host.profile.version());}
+  catch(IllegalStateException incompatible){report("HOST_REJECTED "+incompatible.getMessage());throw incompatible;}
   if(!WorkshopApi.manager().isPermissionGranted(PluginPermission.CLASS_TRANSFORM)||!WorkshopApi.manager().isPermissionGranted(PluginPermission.LIBRARY_READ))throw new IllegalStateException("Grant class-transform and library-read permissions");
   try{
-   fingerprint(OWNER,"e226ee353de834409b93abeaffebe23a7d197749b3d19afc69fd1dfab84f704e");
-   fingerprint("androidx.compose.ui.ח","9a683e5cac898bf086cf58ee0e70ede6ba7e4fa4a7b5cc31134336e31b0eda05");
    discSettings=new DiscSettings(WorkshopApi.manager().createConfigManager(),value->{
     displaySettings.setValue(value);report("DISC_SETTINGS amount="+value.amount()+" front="+value.front()+" rotate="+value.rotate());
    });
-   handles.add(WorkshopApi.hookRegistrar().replaceComposable(OWNER,METHOD,"androidx.compose.ui.ח",
+   handles.add(WorkshopApi.hookRegistrar().replaceComposable(host.profile.owner(),METHOD,host.profile.caller(),
     List.of("kotlin.jvm.functions.Function0","boolean","boolean","boolean","androidx.compose.ui.Modifier"),50,new ComposableHook(){
      @Override public void Content(UiHookCall call,Composer composer,int changed){content(call,composer);}
     }));
@@ -216,7 +216,7 @@ public final class CdPageProbePlugin extends SpwPlugin {
    // layout nodes must not be traversed by the local-image decode worker.
    sourceObserver=new javax.swing.Timer(100,event->observeSources());sourceObserver.start();
    animationClock=new javax.swing.Timer(16,event->animateFrames());animationClock.setCoalesce(true);animationClock.start();
-   report("START 1.1.0 Digital Disc; retained pixels are not readiness; hooks="+handles.size());
+   report("START 1.1.1 Host Compatibility; retained pixels are not readiness; hooks="+handles.size());
   }catch(Throwable e){stop();throw new IllegalStateException("SelfDraw startup failed",e);}
  }
  @SuppressWarnings("unchecked")
@@ -227,7 +227,7 @@ public final class CdPageProbePlugin extends SpwPlugin {
    frame=new Frame();composer.updateRememberedValue(frame);synchronized(frames){frames.add(new WeakReference<>(frame));}
   }else frame=(Frame)remembered;
   Density density=(Density)composer.consume(CompositionLocalsKt.getLocalDensity());
-  frame.sheet=(PlayerSheetState)composer.consume(androidx.compose.ui.ѐ.Ϳ());
+  frame.sheet=(PlayerSheetState)composer.consume(host.sheetLocal());
   final DiscSettings.Values display=displaySettings.getValue();
   final int amount=display.amount();final boolean front=display.front();
   var args=call.getArguments();frame.renderAllowed=(Boolean)args.get(3);
@@ -415,8 +415,8 @@ public final class CdPageProbePlugin extends SpwPlugin {
  }
  private String currentSong(){var item=WorkshopApi.playback().getCurrentMediaItem();return item==null?null:item.getPath();}
  private static long size(LayoutCoordinates c)throws Exception{return (Long)LayoutCoordinates.class.getMethod("getSize-YbymL2g").invoke(c);}
- @SuppressWarnings("unchecked") private static void drawOriginal(List<Object> a,Modifier modifier,Composer c,Function0<Unit> toggle,boolean lyrics){
-  androidx.compose.ui.א.Ϳ(toggle,lyrics,(Boolean)a.get(2),(Boolean)a.get(3),modifier,c,0,0);
+ @SuppressWarnings("unchecked") private void drawOriginal(List<Object> a,Modifier modifier,Composer c,Function0<Unit> toggle,boolean lyrics){
+  host.drawOriginal(toggle,lyrics,(Boolean)a.get(2),(Boolean)a.get(3),modifier,c);
  }
  @Override public synchronized void stop(){
   enabled.setValue(false);running=false;
@@ -429,11 +429,6 @@ public final class CdPageProbePlugin extends SpwPlugin {
   handles.clear();rawSource.remove();report("STOP SelfDraw disabled; native fallback");
  }
  @Override public void update(){stop();}@Override public void delete(){stop();}
- private void fingerprint(String owner,String expected)throws Exception{
-  try(var in=getClass().getClassLoader().getResourceAsStream(owner.replace('.','/')+".class")){
-   if(in==null||!expected.equals(HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(in.readAllBytes()))))throw new IllegalStateException("Host fingerprint mismatch: "+owner);
-  }
- }
  private synchronized void report(String s){
   try{Files.createDirectories(log.toAbsolutePath().getParent());Files.writeString(log,Instant.now()+" "+s+System.lineSeparator(),StandardOpenOption.CREATE,StandardOpenOption.APPEND);}catch(Exception e){System.err.println(s);}
  }

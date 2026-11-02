@@ -4,7 +4,9 @@
 
 Adds a digital CD presentation to Salt Player for Windows (SPW), with a complete album cover and a CD extending from its right side.
 
-Current version: **v1.1.0**, for **SPW 1.19.0 Microsoft Store**.
+Current version: **v1.1.1**. Includes interface mappings for **SPW 1.19.0 and 1.19.3 Microsoft Store**; see the compatibility table below for validation status.
+
+V1.1.1 updates host compatibility while retaining the V1.1.0 layout, animations and features.
 
 V1.1.0 adds disc exposure, front-layer presentation and playback-linked rotation, with improved image preparation, continuous cover handoff and same-directory disc reuse. See the [changelog](CHANGELOG.md) (Chinese).
 
@@ -15,11 +17,6 @@ This plugin was inspired by [**Georgia-ReBORN**](https://github.com/TT-ReBORN/Ge
 I love the way it presents an album cover together with a disc. I used to collect physical records, and I enjoyed holding an album and looking at its cover and disc artwork. But preserving physical CDs is not easy. Even with careful storage, they can age and deteriorate over the years. For me, digital music is a better fit for long-term collecting and everyday listening.
 
 I wanted to bring this digital record experience to Salt Player: enjoying the convenience of digital music while keeping some of the pleasure of collecting and appreciating physical albums, and sharing it with others who feel the same way.
-
-## Results Showcase
-
-https://github.com/user-attachments/assets/74f35d9a-0656-40d2-9170-b83e0696891a
-
 
 ## Features
 
@@ -35,9 +32,13 @@ https://github.com/user-attachments/assets/74f35d9a-0656-40d2-9170-b83e0696891a
 - **Combined reflection**: the cover and CD have a short reflection that fades downward.
 - Local files are read only. The plugin does not modify songs or original disc images, or save generated disc artwork to disk.
 
+## Results Showcase
+
+https://github.com/user-attachments/assets/74f35d9a-0656-40d2-9170-b83e0696891a
+
 ## Installation and use
 
-The current adaptation is based on **SPW 1.19.0 Microsoft Store**. The plugin uses SPW's internal drawing interfaces, so later SPW versions may require a new adaptation.
+Current interface mappings cover **SPW 1.19.0 and 1.19.3 Microsoft Store**. The plugin uses SPW's internal drawing interfaces, so later SPW versions may require a new adaptation.
 
 1. Obtain the compiled `.spmod` file. The source ZIP cannot be installed directly; see the build instructions below to compile it yourself.
 2. In SPW's plugin manager, use the local plugin import option to select the `.spmod` file.
@@ -49,7 +50,7 @@ After a track change, the plugin waits for a selection-stability interval of abo
 
 Collapsing the entire playback detail page or disabling the plugin cancels unfinished animations and delayed return actions, preventing remnants from appearing over the mini player. Different return paths and rapid interactions still leave room for improvement.
 
-The current installation package is `SPW_Digital_Disc_v1.1.0.spmod`. The source ZIP is for development and building; choose the `.spmod` file when installing.
+The current installation package is `SPW_Digital_Disc_v1.1.1.spmod`. The source ZIP is for development and building; choose the `.spmod` file when installing.
 
 ## Where to put local disc images
 
@@ -96,23 +97,25 @@ Front mode moves the complete disc with a short uniform fade at entry and exit. 
 
 Only the disc rotates; the cover stays upright and the reflection shares the angle. A new track starts upright. Ejection, retraction and exposure 0 do not rotate. Collapsing the secondary page to the mini player freezes the angle; reopening resumes after ejection completes. Returning to the primary page ends that presentation, so entering the secondary page again starts upright. Disabling rotation restores the upright orientation.
 
+## SPW host compatibility
+
+| SPW host | Interface mapping | V1.1.1 offline regression | Real-machine status |
+| --- | --- | --- | --- |
+| 1.19.0 Microsoft Store | Adapted | 35 programs pass | V1.1.0 passed; V1.1.1 pending |
+| 1.19.3 Microsoft Store | Adapted | 35 programs pass | V1.1.1 pending |
+| Other versions or distributions | Unverified | Unverified | Unverified |
+
+Offline tests cover interface resolution, cover calls, configuration storage, images, animations and rotation state. They do not run Windows native playback or Skia rendering. Startup matches a complete profile by actual class fingerprints, rather than Windows 10/11 or channel labels alone. Unknown interfaces prevent activation with a detailed error. Rotation stops and logs a warning if its playback-state checks fail.
+
+Host updates that prevent loading take priority for compatibility fixes and may receive a patch release. A version-number change alone does not require a release when features still work. New adaptations retain verified older profiles where possible. Include the host version, channel, plugin version and full error when reporting a problem.
+
 ## Compatibility and limitations
 
-- Adapted to SPW 1.19.0 Microsoft Store. Internal drawing and playback interfaces are checked by class fingerprints; other host versions require adaptation.
+- Complete SPW 1.19.0 and 1.19.3 interface mappings are selected by critical class fingerprints. Unknown interfaces require review; checks are not bypassed.
 - Disc images are searched only in the audio file's directory using fixed filenames, without recursion, custom paths or automatic downloads.
 - JPG preparation masks the outer circle but does not detect the disc, remove backgrounds inside the circle or create a center hole.
 - If playback state cannot be read, rotation stops and logs `ROTATION_STATE_UNAVAILABLE`; artwork display retains its existing behavior.
 - Window sizes, display scaling and rapid page changes depend on host behavior. Report problems using the repository's Issue templates.
-
-## V1.1.0 changes
-
-- Three independent settings: exposure, front-layer presentation and playback-linked rotation.
-- Improved proportional image fitting, alpha preservation, antialiased edges and generated hub rings; tiny spindle highlight retained.
-- Continuous cover handoff during same-album track changes, with stale disc and asynchronous-result isolation.
-- Verified reuse of unchanged same-directory artwork to reduce reading and decoding.
-- Existing primary page, secondary layout and ejection/retraction timing retained.
-
-See [CHANGELOG.md](CHANGELOG.md) (Chinese) for the full history.
 
 ## Implementation
 
@@ -129,7 +132,7 @@ These steps generate a `.spmod` plugin. You do not need these development tools 
 | JDK | Use the project's existing JDK 25 setup, including both `java` and `javac` |
 | Gradle | Use Gradle 9.8; the source package does not include a Gradle Wrapper, so install Gradle separately |
 | Python | Python 3; on Windows, it must be available as the `python` command |
-| SPW host file | `app\ffmpeg-x64.dll` from the installation directory of the supported SPW 1.19.0 Microsoft Store version |
+| SPW host file | `app\ffmpeg-x64.dll` from the installation directory of the supported SPW 1.19.0 or 1.19.3 Microsoft Store version |
 
 Provide the host file from the matching SPW installation. A generic FFmpeg DLL with the same filename cannot be used instead. The host and development tools are not included in the source package.
 
@@ -181,7 +184,7 @@ If using PowerShell, configure the same environment variables and run this in th
 After the build reports `BUILD SUCCESSFUL`, look in the source directory's `dist` folder for:
 
 ```text
-SPW_Digital_Disc_v1.1.0.spmod
+SPW_Digital_Disc_v1.1.1.spmod
 ```
 
 This is the installation package that SPW can import. You do not need to ZIP the entire source directory or rename its extension. The `build` directory contains intermediate build output, not the installation package.

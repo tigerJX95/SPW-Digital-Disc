@@ -17,7 +17,7 @@ public class DiscSettingsTest {
   public void close(){closes++;}
   void fire(){for(var listener:List.copyOf(listeners))listener.accept(helper);}
  }
- static ConfigHelper helper(Path file)throws Exception{return (ConfigHelper)Class.forName("androidx.compose.ui.Ƌ").getConstructor(Path.class).newInstance(file);}
+ static ConfigHelper helper(Path file)throws Exception{return (ConfigHelper)Class.forName(TestHost.helper()).getConstructor(Path.class).newInstance(file);}
  static void flush()throws Exception{SwingUtilities.invokeAndWait(()->{});}
  public static void main(String[] args)throws Exception{
   Path file=Files.createTempDirectory("disc-settings").resolve("config.json");

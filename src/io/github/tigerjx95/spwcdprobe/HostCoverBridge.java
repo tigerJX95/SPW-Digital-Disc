@@ -11,7 +11,7 @@ final class HostCoverBridge {
         // The pinned host's real loaded covers use MipmapCoverPainter (ƙ).
         // painterResource loading/error artwork can itself be a BitmapPainter,
         // so merely finding ImageBitmap is not proof that the album is ready.
-        if(painter==null||!painter.getClass().getName().equals("androidx.compose.ui.ƙ"))return false;
+        if(painter==null||!painter.getClass().getName().equals(HostCompatibility.current().painter()))return false;
         for(Class<?> type=painter.getClass();type!=null;type=type.getSuperclass()){
             for(var field:type.getDeclaredFields()){
                 if(java.lang.reflect.Modifier.isStatic(field.getModifiers()))continue;

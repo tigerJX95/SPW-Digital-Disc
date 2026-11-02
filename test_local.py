@@ -27,7 +27,7 @@ tests = [
     'ProductionResumeTest', 'ProductionLayoutRecoveryTest', 'ObservableHandoffTest',
     'HostEntryTest', 'HostImageDrawTest', 'RootRasterTest', 'CoverDiscTest',
     'LocalDiscRasterTest', 'DiscMotionRasterTest', 'ReflectionTest', 'RevealOrderTest',
-    'RevealCycleTest', 'DiscExposureTest', 'DiscSettingsTest', 'PreferenceSchemaTest', 'FrontSettingsTest', 'FrontRendererTest', 'FrontDiscMotionTest', 'DiscRotationTest', 'RotationSettingsTest', 'RotationRendererTest',
+    'RevealCycleTest', 'DiscExposureTest', 'DiscSettingsTest', 'PreferenceSchemaTest', 'FrontSettingsTest', 'FrontRendererTest', 'FrontDiscMotionTest', 'DiscRotationTest', 'RotationSettingsTest', 'RotationRendererTest', 'HostCompatibilityTest', 'PluginSourceMetadataTest', 'HostBindingsTest',
 ]
 qa = root / 'build/qa'
 qa.mkdir(parents=True, exist_ok=True)
@@ -46,5 +46,5 @@ subprocess.run([str(javac), '--release', '21', '-encoding', 'UTF-8', '-cp', clas
                 '-d', str(handoff), *map(str, sorted(root.glob('tests/handoff-double/*.java')))], check=True)
 subprocess.run([str(java), '-Djava.awt.headless=true', '-cp', os.pathsep.join(map(str, [handoff, classes, host])),
                 'io.github.tigerjx95.spwcdprobe.ContinuousCoverTest'], check=True)
-print('PASS: 32 offline regression programs. OwnedCoverTest requires a matching native Skiko backend and is not run here.')
+print('PASS: 35 offline regression programs. OwnedCoverTest requires a matching native Skiko backend and is not run here.')
 print('Offline scope excludes Windows SPW playback and native Skia decode.')

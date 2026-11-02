@@ -1,0 +1,22 @@
+[
+  {
+    "version": "1.19.0",
+    "host_sha256": "105d4181bb025597f55506a931349ea4968b925db5d70d5e0b630102c9bfac57",
+    "surface": "androidx/compose/ui/Է",
+    "screen": "androidx/compose/ui/ര",
+    "surface_sha256": "ce6e126cd845edc847b42ad820fe1746ba8e0b39340332be5343c427b86d576e",
+    "screen_sha256": "a5c3c8d671e5251bc23c972f5da75b58043e871ffe7502774d42c2f8cd2bb66a",
+    "caller_descriptor": "(Landroidx/compose/ui/ح;ZLandroidx/compose/ui/གྷ;Landroidx/compose/foundation/layout/ColumnScope;Landroidx/compose/runtime/Composer;I)Lkotlin/Unit;",
+    "callee_descriptor": "(Lkotlin/jvm/functions/Function0;ZLandroidx/compose/ui/གྷ;Landroidx/compose/ui/Modifier;Landroidx/compose/runtime/Composer;II)V"
+  },
+  {
+    "version": "1.19.3",
+    "host_sha256": "2143d402bc7ac349397a7e363cf465f1153803f3d5105e9010a31d4c389b0b28",
+    "surface": "androidx/compose/ui/ԥ",
+    "screen": "androidx/compose/ui/ё",
+    "surface_sha256": "ffb478259215d6c0205564a216cba50a5a99c31337baa09ef7d93220b5f340fa",
+    "screen_sha256": "c2ead3dba98320caeaa3662e961899d28ab9e2a14a2731c5513152e6680ace96",
+    "caller_descriptor": "(Landroidx/compose/ui/ݝ;ZLandroidx/compose/ui/च;Landroidx/compose/foundation/layout/ColumnScope;Landroidx/compose/runtime/Composer;I)Lkotlin/Unit;",
+    "callee_descriptor": "(Lkotlin/jvm/functions/Function0;ZLandroidx/compose/ui/च;Landroidx/compose/ui/Modifier;Landroidx/compose/runtime/Composer;II)V"
+  }
+]

@@ -18,13 +18,13 @@ public class HostEntryTest {
   Class<?> resolverClass=Class.forName("com.xuncorp.voxzen.workshop.hooks.Ԫ");Object resolver=resolverClass.getField("\u037f").get(null);
   var ui=resolverClass.getMethod("\u037f",String.class,String.class,String.class,List.class);
   var normal=resolverClass.getMethod("\u037f",String.class,String.class,List.class);
-  System.out.println("PASS "+ui.invoke(resolver,"androidx.compose.ui.א","\u037f","androidx.compose.ui.ח",List.of("kotlin.jvm.functions.Function0","boolean","boolean","boolean","androidx.compose.ui.Modifier")));
+  System.out.println("PASS "+ui.invoke(resolver,HostCompatibility.current().owner(),"\u037f",HostCompatibility.current().caller(),List.of("kotlin.jvm.functions.Function0","boolean","boolean","boolean","androidx.compose.ui.Modifier")));
   System.out.println("PASS "+normal.invoke(resolver,"androidx.compose.ui.graphics.painter.Painter","draw-x_KDEd0",List.of("androidx.compose.ui.graphics.drawscope.DrawScope","long","float","androidx.compose.ui.graphics.ColorFilter")));
   var method=BoxKt.class.getMethod("Box",Modifier.class,Alignment.class,boolean.class,Function3.class,Composer.class,int.class,int.class);
   if(method==null)throw new AssertionError();
   if(!"library-read".equals(com.xuncorp.spw.workshop.api.PluginPermission.LIBRARY_READ.getId()))throw new AssertionError("permission ID differs");
   System.out.println("PASS real library-read permission identifier");
-  Object permissions=Class.forName("com.xuncorp.voxzen.workshop.ޅ").getMethod("\u037f",String.class).invoke(null,"class-transform,library-read");
+  Object permissions=Class.forName(TestHost.newer()?"com.xuncorp.voxzen.workshop.permissions.Ϳ":"com.xuncorp.voxzen.workshop.ޅ").getMethod("\u037f",String.class).invoke(null,"class-transform,library-read");
   if(!permissions.equals(Set.of("class-transform","library-read")))throw new AssertionError("manifest permissions parsing");
   System.out.println("PASS actual host parses both declared manifest permissions");
   Modifier widget=CanvasWidget.modifier(SelfDrawLayout.fit(1673,930,1,false),1,()->Unit.INSTANCE);
