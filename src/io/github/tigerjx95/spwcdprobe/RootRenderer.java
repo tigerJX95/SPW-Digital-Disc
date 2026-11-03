@@ -13,7 +13,7 @@ import java.lang.reflect.Method;
 import java.lang.reflect.Constructor;
 /** Draws into our own full-width Canvas. Never invoked inside the native Image node. */
 final class RootRenderer {
- interface Source {void draw(DrawScope scope,float width,float height)throws Exception;}
+ interface Source {void draw(DrawScope scope,float width,float height)throws Exception; default boolean blankDisc(){return false;}}
  interface Disc {boolean draw(DrawScope scope,float cx,float cy,float diameter)throws Exception;}
  private static final Method CLIP,CLIP_RECT,CIRCLE,BRUSH_CIRCLE,RADIAL,LINEAR,BOX_COLOR,SIZE,INTRINSIC,DRAW;
  private static final Constructor<Stroke> STROKE;
@@ -50,11 +50,15 @@ final class RootRenderer {
   draw(scope,painter,enter,leave,disc,exposure,amount,front,layer,0f);
  }
  static void draw(DrawScope scope,Object painter,Runnable enter,Runnable leave,Disc disc,float exposure,int amount,boolean front,FrontDiscLayer layer,float angle)throws Exception{
+  draw(scope,painter,enter,leave,disc,exposure,amount,front,layer,angle,false);
+ }
+ static void draw(DrawScope scope,Object painter,Runnable enter,Runnable leave,Disc disc,float exposure,int amount,boolean front,FrontDiscLayer layer,float angle,boolean blank)throws Exception{
   long intrinsic=(Long)INTRINSIC.invoke(painter);float iw=x(intrinsic),ih=y(intrinsic);
   if(!Float.isFinite(iw)||!Float.isFinite(ih)||iw<=0||ih<=0){iw=ih=1;}
   final float ratio=iw/ih;
-  paint(scope,ratio,(s,w,h)->{
-   enter.run();try{DRAW.invoke(painter,s,pack(w,h),1f,null);}finally{leave.run();}
+  paint(scope,ratio,new Source(){
+   public void draw(DrawScope s,float w,float h)throws Exception{enter.run();try{DRAW.invoke(painter,s,pack(w,h),1f,null);}finally{leave.run();}}
+   public boolean blankDisc(){return blank;}
   },disc,SkiaBackedPath_skikoKt::Path,exposure,amount,front,layer,angle);
  }
  static void paint(DrawScope scope,float aspect,Source source)throws Exception{paint(scope,aspect,source,(s,x,y,d)->false);}
@@ -103,7 +107,7 @@ final class RootRenderer {
     // Fill the circle without stretching; crop only this secondary copy.
     float dw=aspect>=1?r*2*aspect:r*2,dh=aspect>=1?r*2:r*2/aspect;
     canvas.save();
-    try{canvas.translate(cx-dw*.5f,cy-dh*.5f);source.draw(scope,dw,dh);}finally{canvas.restore();}
+    try{if(source.blankDisc())blankFace(scope,r,cx,cy);else{canvas.translate(cx-dw*.5f,cy-dh*.5f);source.draw(scope,dw,dh);}}finally{canvas.restore();}
     finish(scope,r,pack(cx,cy));
    }finally{canvas.restore();}
    // A faint translucent film keeps the background visible through the hole.
@@ -115,6 +119,10 @@ final class RootRenderer {
    }
   }finally{moving.restore();}
   if(!front)cover(scope,aspect,source,side);
+ }
+ private static void blankFace(DrawScope scope,float r,float cx,float cy)throws Exception{
+  // Uniform light silver-gray face: the reference has no directional light band.
+  CIRCLE.invoke(scope,ColorKt.Color(0xffdce0e3),r,pack(cx,cy),1f,Fill.INSTANCE,null,3);
  }
  private static Stroke stroke(float width)throws Exception{return STROKE.newInstance(width,4f,0,0,null,null);}
  private static Brush hub(float r)throws Exception{

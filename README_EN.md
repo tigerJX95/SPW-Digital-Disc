@@ -4,9 +4,9 @@
 
 Adds a digital CD presentation to Salt Player for Windows (SPW), with a complete album cover and a CD extending from its right side.
 
-Current version: **v1.2.0**. Includes interface mappings for **SPW 1.19.0 and 1.19.3 Microsoft Store**; see the compatibility table below for validation status.
+Current version: **v1.2.1**. Includes interface mappings for **SPW 1.19.0 and 1.19.3 Microsoft Store**; see the compatibility table below for validation status.
 
-V1.2.0 refines eject/retract easing, braking on early return, gentle rotation starts and the default CD’s narrow white edge and translucent metallic hub. Fine grooves, silver highlights and a milky inner lip add depth while retaining the translucent hole and white spindle.
+V1.2.1 adds a silver-white blank CD when no usable album cover is available, reusing the existing rim, metallic hub, translucent hole and spindle. Failed local disc reads are throttled to reduce repeated decoding. The blank face uses a uniform light silver-gray tone to separate it from the narrow white rim.
 
 [Update history](CHANGELOG.md) (Chinese)
 
@@ -19,6 +19,8 @@ I love the way it presents an album cover together with a disc. I used to collec
 I wanted to bring this digital record experience to Salt Player: enjoying the convenience of digital music while keeping some of the pleasure of collecting and appreciating physical albums, and sharing it with others who feel the same way.
 
 ## Features
+
+- **Missing album cover**: after the host finishes loading without a usable cover, show the native placeholder beside a silver-white blank CD. Custom disc artwork still takes priority. Uses SPW's valid cover and completed read result; no album-cover filename whitelist or timeout-based absence detection.
 
 - **Primary detail page**: keeps SPW's native album cover, lyrics, and playback controls.
 - **Secondary display page**: clicking the album cover opens a larger, centered presentation of the complete cover and a CD on its right. The cover is not squeezed into half an image.
@@ -52,7 +54,7 @@ After a track change, the plugin waits for a selection-stability interval of abo
 
 Collapsing the entire playback detail page or disabling the plugin cancels unfinished animations and delayed return actions, preventing remnants from appearing over the mini player. Different return paths and rapid interactions still leave room for improvement.
 
-The current installation package is `SPW_Digital_Disc_v1.2.0.spmod`. The source ZIP is for development and building; choose the `.spmod` file when installing.
+The current installation package is `SPW_Digital_Disc_v1.2.1.spmod`. The source ZIP is for development and building; choose the `.spmod` file when installing.
 
 ## Where to put local disc images
 
@@ -101,10 +103,10 @@ Only the disc rotates; the cover stays upright and the reflection shares the ang
 
 ## SPW host compatibility
 
-| SPW host | Interface mapping | V1.2.0 offline regression |
+| SPW host | Interface mapping | V1.2.1 offline regression |
 | --- | --- | --- |
-| 1.19.0 Microsoft Store | Adapted | 40 programs pass |
-| 1.19.3 Microsoft Store | Adapted | 40 programs pass |
+| 1.19.0 Microsoft Store | Adapted | 43 programs pass |
+| 1.19.3 Microsoft Store | Adapted | 43 programs pass |
 | Other versions or distributions | Unverified | Unverified |
 
 Offline tests cover interface resolution, cover calls, configuration storage, images, animations and rotation state. They do not run Windows native playback or Skia rendering. Startup matches a complete profile by actual class fingerprints, rather than Windows 10/11 or channel labels alone. Unknown interfaces prevent activation with a detailed error. Rotation stops and logs a warning if its playback-state checks fail.
@@ -186,7 +188,7 @@ If using PowerShell, configure the same environment variables and run this in th
 After the build reports `BUILD SUCCESSFUL`, look in the source directory's `dist` folder for:
 
 ```text
-SPW_Digital_Disc_v1.2.0.spmod
+SPW_Digital_Disc_v1.2.1.spmod
 ```
 
 This is the installation package that SPW can import. You do not need to ZIP the entire source directory or rename its extension. The `build` directory contains intermediate build output, not the installation package.
@@ -219,3 +221,4 @@ You still need the matching SPW Windows host file. Output is also placed in `dis
 The project uses the [MIT License](LICENSE).
 
 See [Third-party notices](THIRD_PARTY_NOTICES.md) (Chinese) for details. The project does not distribute sample commercial album covers, disc artwork, or the SPW host and its dependencies. User-provided music and images are outside the scope of this project's MIT license.
+

@@ -22,6 +22,8 @@ import java.util.*;
 public final class CdPageProbePlugin extends SpwPlugin {
  private static final String METHOD="\u037f";
  private HostBindings host;
+ private final CoverAvailability coverAvailability=new CoverAvailability();
+ private HostCoverStatus coverStatus;
  private final List<HookHandle> handles=new ArrayList<>();
  private final List<WeakReference<Frame>> frames=new ArrayList<>();
  private final MutableState<Boolean> enabled=state(false);
@@ -49,7 +51,7 @@ public final class CdPageProbePlugin extends SpwPlugin {
   Object lastPainted;
   final MutableState<Object> passPainter=state(null);
   Object observedSource;
-  boolean observedReady;
+  boolean observedReady,observedMissing,fallbackActive;
   String observedSong;
   ReflectionRenderer reflection;
   final FrontDiscLayer frontDiscLayer=new FrontDiscLayer();
@@ -72,6 +74,7 @@ public final class CdPageProbePlugin extends SpwPlugin {
   Object ownedSource,lastCaptureFailure;
   String handoffDiagnostic="";
   void clearCover(){
+   fallbackActive=false;
    if(ownedCover!=null)ownedCover.close();ownedCover=null;
    if(pendingCover!=null)pendingCover.close();pendingCover=null;
    ownedSource=null;lastCaptureFailure=null;
@@ -90,7 +93,18 @@ public final class CdPageProbePlugin extends SpwPlugin {
    if(!presentationVisible())return null;
    String song;try{song=currentSong();}catch(Exception unavailable){return null;}
    if(!Objects.equals(song,observedSong))observe(song);
-   return resolveCover(source());
+   return resolvePresentation(source());
+  }
+  Object resolvePresentation(Object live){
+   if(live==null&&coverAvailability.missing(observedSong)){
+    Object placeholder=placeholder();
+    if(placeholder!=null){
+     if(visualCover()!=null)clearCover();
+     fallbackActive=true;return placeholder;
+    }
+   }
+   fallbackActive=false;
+   return resolveCover(live);
   }
   Object resolveCover(Object live){
    if(live!=null&&live!=ownedSource&&live!=lastCaptureFailure)try{
@@ -123,7 +137,7 @@ public final class CdPageProbePlugin extends SpwPlugin {
   boolean suppress(){
    discRevision.getValue(); // Resolve completion must redraw even while Canvas is waiting.
    sourceRevision.getValue(); // Native subtree/cached image completion is not always a parent recomposition.
-   return secondary&&Boolean.TRUE.equals(enabled.getValue())&&Boolean.TRUE.equals(ready.getValue())&&!failed&&renderAllowed&&sheet!=null&&sheet.Ԩ()&&sheet.ԩ()&&(visualCover()!=null||HostCoverBridge.imageReady(source()))&&(pendingCover!=null||Boolean.TRUE.equals(trackPending.getValue())||discResolved());
+   return secondary&&Boolean.TRUE.equals(enabled.getValue())&&Boolean.TRUE.equals(ready.getValue())&&!failed&&renderAllowed&&sheet!=null&&sheet.Ԩ()&&sheet.ԩ()&&(fallbackActive||visualCover()!=null||HostCoverBridge.imageReady(source()))&&(pendingCover!=null||Boolean.TRUE.equals(trackPending.getValue())||discResolved());
   }
   void restoreNative(){
    clearCover();rotation.reset();rotationAngle.setValue(0f);
@@ -152,6 +166,16 @@ public final class CdPageProbePlugin extends SpwPlugin {
    }catch(Exception ignored){}
    return false;
   }
+  Object placeholder(){
+   for(var image:images()){
+    Object painter=image.painter();
+    String type=painter==null?"":painter.getClass().getName();
+    boolean placeholder=type.equals("androidx.compose.ui.graphics.painter.BitmapPainter")
+      ||type.equals("androidx.compose.ui.graphics.painter.ColorPainter")||type.equals("androidx.compose.ui.graphics.vector.VectorPainter");
+    if(placeholder&&painter!=rejectedSource.getValue())return painter;
+   }
+   return null;
+  }
   Object source(){
    Object captured=artwork.getValue(),rejected=rejectedSource.getValue();
    var current=images();
@@ -161,10 +185,11 @@ public final class CdPageProbePlugin extends SpwPlugin {
   }
 
   boolean observe(String song){
+   coverAvailability.observe(song,System.nanoTime());
    coverSelection.song(song);
    boolean changed=!Objects.equals(song,observedSong);
    if(changed){
-    rotation.reset();rotationAngle.setValue(0f);
+    fallbackActive=false;rotation.reset();rotationAngle.setValue(0f);
     boolean previouslyObserved=observedSong!=null;
     if(song!=null&&!song.isBlank())awaitCover();else clearCover();
     observedSong=song;failed=false;rejectedSource.setValue(null);artwork.setValue(null);
@@ -178,7 +203,9 @@ public final class CdPageProbePlugin extends SpwPlugin {
     HostCoverBridge.invalidate(nativeRoot);
    }
    Object current=source();boolean available=HostCoverBridge.imageReady(current);
-   if(changed||current!=observedSource||available!=observedReady){
+   boolean missing=coverAvailability.missing(song);
+   if(changed||current!=observedSource||available!=observedReady||missing!=observedMissing){
+    observedMissing=missing;
     observedSource=current;observedReady=available;
     report("SOURCE_STATE song="+song+" painter="+(current==null?"none":current.getClass().getName())+" decoded="+available+" failed="+failed);
     HostCoverBridge.invalidate(nativeRoot);return true;
@@ -198,6 +225,9 @@ public final class CdPageProbePlugin extends SpwPlugin {
   catch(IllegalStateException incompatible){report("HOST_REJECTED "+incompatible.getMessage());throw incompatible;}
   if(!WorkshopApi.manager().isPermissionGranted(PluginPermission.CLASS_TRANSFORM)||!WorkshopApi.manager().isPermissionGranted(PluginPermission.LIBRARY_READ))throw new IllegalStateException("Grant class-transform and library-read permissions");
   try{
+   coverAvailability.reset();
+   coverStatus=new HostCoverStatus(coverAvailability,this::currentSong);
+   handles.add(coverStatus.install());
    discSettings=new DiscSettings(WorkshopApi.manager().createConfigManager(),value->{
     displaySettings.setValue(value);report("DISC_SETTINGS amount="+value.amount()+" front="+value.front()+" rotate="+value.rotate());
    });
@@ -222,7 +252,7 @@ public final class CdPageProbePlugin extends SpwPlugin {
    // layout nodes must not be traversed by the local-image decode worker.
    sourceObserver=new javax.swing.Timer(100,event->observeSources());sourceObserver.start();
    animationClock=new javax.swing.Timer(16,event->animateFrames());animationClock.setCoalesce(true);animationClock.start();
-   report("START 1.2.0 Generated Disc Finish; retained pixels are not readiness; hooks="+handles.size());
+   report("START 1.2.1 Generated Disc Finish; retained pixels are not readiness; hooks="+handles.size());
   }catch(Throwable e){stop();throw new IllegalStateException("SelfDraw startup failed",e);}
  }
  @SuppressWarnings("unchecked")
@@ -337,13 +367,13 @@ public final class CdPageProbePlugin extends SpwPlugin {
         DiscImage cover=frame.visualCover();
         float exposed=frame.pendingCover!=null&&frame.ownedCover==null?0f:motion.exposed();
         if(cover!=null)RootRenderer.paint(scope,cover.aspect(),cover::drawCover,disc,androidx.compose.ui.graphics.SkiaBackedPath_skikoKt::Path,exposed,amount,front,frame.frontDiscLayer,angle);
-        else RootRenderer.draw(scope,painter,()->rawSource.set(true),()->rawSource.remove(),disc,motion.exposed(),amount,front,frame.frontDiscLayer,angle);
+        else RootRenderer.draw(scope,painter,()->rawSource.set(true),()->rawSource.remove(),disc,motion.exposed(),amount,front,frame.frontDiscLayer,angle,frame.fallbackActive);
         float gap=4*density.getDensity(),reflectedHeight=plan.height()-plan.side()-gap;
         if(reflectedHeight>0){
          if(frame.reflection==null)frame.reflection=new ReflectionRenderer();
          try{frame.reflection.draw(scope,plan.side(),plan.width(),reflectedHeight,gap,()->{
           if(cover!=null)RootRenderer.paint(scope,cover.aspect(),cover::drawCover,disc,androidx.compose.ui.graphics.SkiaBackedPath_skikoKt::Path,exposed,amount,front,frame.frontDiscLayer,angle);
-          else RootRenderer.draw(scope,painter,()->rawSource.set(true),()->rawSource.remove(),disc,motion.exposed(),amount,front,frame.frontDiscLayer,angle);
+          else RootRenderer.draw(scope,painter,()->rawSource.set(true),()->rawSource.remove(),disc,motion.exposed(),amount,front,frame.frontDiscLayer,angle,frame.fallbackActive);
          });}
          catch(Exception error){report("REFLECTION_ERROR "+error+"; cause="+error.getCause());}
         }
@@ -372,7 +402,12 @@ public final class CdPageProbePlugin extends SpwPlugin {
    String song=currentSong();if(localDiscs!=null)localDiscs.request(song);boolean changed=false;
    synchronized(frames){for(var it=frames.iterator();it.hasNext();){
     Frame frame=it.next().get();if(frame==null){it.remove();continue;}
-    if(frame.secondary&&frame.nativeRoot!=null&&frame.nativeRoot.isAttached())changed|=frame.observe(song);
+    if(frame.secondary&&frame.nativeRoot!=null&&frame.nativeRoot.isAttached()){
+     changed|=frame.observe(song);
+     // Bootstrap only when enabled after the host's last completed read.
+     // One host refresh per unknown track; never repeat or infer absence by timeout.
+     if(coverStatus!=null&&frame.source()==null&&frame.ownedCover==null&&coverAvailability.refreshNeeded(song,System.nanoTime()))coverStatus.refreshCurrent();
+    }
    }}
    if(changed){sourceRevision.setValue(sourceRevision.getValue()+1);report("SOURCE_REFRESH song="+song);}
   }catch(Exception error){report("SOURCE_OBSERVER_ERROR "+error);}
@@ -406,12 +441,12 @@ public final class CdPageProbePlugin extends SpwPlugin {
     }
     Object source=frame.passPainter.getValue();
     if(frame.motion.phase()==DiscTransition.Phase.TRACK_WAIT){
-     if(frame.trackGate.ready(song,source,frame.ownedCover!=null||HostCoverBridge.imageReady(source),discResolved(),now)){
+     if(frame.trackGate.ready(song,source,frame.fallbackActive||frame.ownedCover!=null||HostCoverBridge.imageReady(source),discResolved(),now)){
       frame.motion.trackReady(now);frame.trackPending.setValue(false);report("TRACK_ENTRY_START song="+song);
      }
     }else if(source!=null&&Boolean.TRUE.equals(frame.ready.getValue()))frame.motion.ready(now);
     if(frame.motion.tick(now))frame.pose.setValue(frame.motion.pose());
-    frame.rotationAngle.setValue(frame.rotation.sample(song,rotate,playing,frame.motion.phase()==DiscTransition.Phase.OPEN&&frame.ownedCover!=null&&discResolved()&&displaySettings.getValue().amount()>0,now));
+    frame.rotationAngle.setValue(frame.rotation.sample(song,rotate,playing,frame.motion.phase()==DiscTransition.Phase.OPEN&&(frame.fallbackActive||frame.ownedCover!=null)&&discResolved()&&displaySettings.getValue().amount()>0,now));
    }catch(Exception error){frame.rotation.sample(song,rotate,false,false,now);frame.motion.reset();frame.pose.setValue(frame.motion.pose());report("ANIMATION_ERROR "+error);}
   }}
   // The faster animation clock may see a new source before sourceObserver.
@@ -425,7 +460,7 @@ public final class CdPageProbePlugin extends SpwPlugin {
   host.drawOriginal(toggle,lyrics,(Boolean)a.get(2),(Boolean)a.get(3),modifier,c);
  }
  @Override public synchronized void stop(){
-  enabled.setValue(false);running=false;
+  enabled.setValue(false);running=false;coverAvailability.reset();coverStatus=null;
   if(animationClock!=null){animationClock.stop();animationClock=null;}
   if(discSettings!=null){try{discSettings.close();}catch(Exception error){report("SETTINGS_CLOSE_WARNING "+error);}discSettings=null;}
   synchronized(frames){for(var ref:frames){Frame frame=ref.get();if(frame!=null)frame.restoreNative();}}

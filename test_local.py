@@ -22,8 +22,8 @@ subprocess.run([str(javac), '--release', '21', '-encoding', 'UTF-8', '-cp', clas
                 '-d', str(output), *map(str, sorted(root.glob('tests/*.java')))], check=True)
 classpath = os.pathsep.join(map(str, [output, classes, host]))
 tests = [
-    'CoverSelectionTest', 'CoverRecoveryTest', 'DiscTransitionTest', 'TrackEntryGateTest', 'GeneratedDiscFinishTest',
-    'LocalDiscServiceTest', 'LocalDiscFixTest', 'DiscArtworkTest', 'DiscGenerationTest', 'LocalDiscReuseTest',
+    'CoverAvailabilityTest', 'BlankDiscTest', 'CoverSelectionTest', 'CoverRecoveryTest', 'DiscTransitionTest', 'TrackEntryGateTest', 'GeneratedDiscFinishTest',
+    'LocalDiscServiceTest', 'LocalDiscFixTest', 'DiscArtworkTest', 'DiscGenerationTest', 'LocalDiscReuseTest', 'LocalDiscRetryTest',
     'ProductionResumeTest', 'ProductionLayoutRecoveryTest', 'ObservableHandoffTest', 'ProductionRotationHandoffTest',
     'HostEntryTest', 'HostImageDrawTest', 'RootRasterTest', 'CoverDiscTest',
     'LocalDiscRasterTest', 'DiscMotionRasterTest', 'ReflectionTest', 'RevealOrderTest',

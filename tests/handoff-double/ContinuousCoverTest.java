@@ -53,6 +53,23 @@ public class ContinuousCoverTest {
    pixels=nextPixels;painter=next;
    HostCoverBridge.nodes=List.of(new HostCoverBridge.Image(painter,root,420*420));
   }
+  // Real Frame missing-cover path: old owned pixels must be released, while
+  // the host placeholder remains the square cover and a new real source wins.
+  var availability=(CoverAvailability)field(CdPageProbePlugin.class,"coverAvailability").get(plugin);
+  var presentation=type.getDeclaredMethod("resolvePresentation",Object.class);presentation.setAccessible(true);
+  Object empty=androidx.compose.ui.graphics.painter.ColorPainter.class.getConstructor(long.class,kotlin.jvm.internal.DefaultConstructorMarker.class).newInstance(androidx.compose.ui.graphics.ColorKt.Color(0xff514c49),null);
+  observe.invoke(frame,"missing");
+  HostCoverBridge.nodes=List.of(new HostCoverBridge.Image(empty,root,420*420));
+  check(presentation.invoke(frame,new Object[]{null})==pixels,"unknown loading retains waiting cover");
+  var ticket=availability.begin("missing","missing",System.nanoTime());
+  availability.complete(ticket,"missing",true);
+  check(presentation.invoke(frame,new Object[]{null})==empty,"confirmed absence uses host placeholder");
+  check(pixels.closes==1&&field(type,"pendingCover").get(frame)==null,"missing clears old song pixels exactly once");
+  check(field(type,"fallbackActive").getBoolean(frame)&&(Boolean)suppress.invoke(frame),"fallback owns Canvas");
+  DiscImage recovered=new DiscImage();Object recoveredPainter=new HostCoverBridge.Decoded(recovered);
+  HostCoverBridge.nodes=List.of(new HostCoverBridge.Image(recoveredPainter,root,420*420));
+  check(presentation.invoke(frame,recoveredPainter)==recoveredPainter&&!field(type,"fallbackActive").getBoolean(frame),"late real cover takes priority");
+  pixels=recovered;
   observe.invoke(frame,"rapid/B");observe.invoke(frame,"rapid/C");
   check(field(type,"pendingCover").get(frame)==pixels&&pixels.closes==0,"rapid changes retain one bounded waiting image");
   observe.invoke(frame,(String)null);check(pixels.closes==1&&pass.getValue()==null,"no current media releases waiting pixels");

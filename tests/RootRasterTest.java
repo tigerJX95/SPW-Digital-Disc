@@ -97,8 +97,9 @@ public class RootRasterTest {
        var previous=graphics.getPaint();var previousStroke=graphics.getStroke();
        graphics.setPaint(new LinearGradientPaint(RootRenderer.x(start),RootRenderer.y(start),RootRenderer.x(end),RootRenderer.y(end),fractions,palette));
        long at=(Long)a[2];float drawn=(Float)a[1];
-       graphics.setStroke(new BasicStroke(((androidx.compose.ui.graphics.drawscope.Stroke)a[4]).getWidth()));
-       graphics.draw(new Ellipse2D.Float(RootRenderer.x(at)-drawn,RootRenderer.y(at)-drawn,drawn*2,drawn*2));
+       var shape=new Ellipse2D.Float(RootRenderer.x(at)-drawn,RootRenderer.y(at)-drawn,drawn*2,drawn*2);
+       if(a[4]==Fill.INSTANCE)graphics.fill(shape);
+       else{graphics.setStroke(new BasicStroke(((androidx.compose.ui.graphics.drawscope.Stroke)a[4]).getWidth()));graphics.draw(shape);}
        graphics.setPaint(previous);graphics.setStroke(previousStroke);return null;
       }
       if(a[4]!=Fill.INSTANCE||(Integer)a[6]!=3)throw new AssertionError("radial hub requires Fill and SrcOver");
