@@ -17,7 +17,6 @@ Describe the problem clearly.
 
 ## 💻 运行环境 / Environment
 - Windows 版本 / Windows Version：
-- 软件版本 / App Version：
 
 ## 🔄 复现步骤 / Steps to Reproduce
 1.
