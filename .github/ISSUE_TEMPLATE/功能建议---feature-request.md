@@ -1,8 +1,8 @@
 ---
 name: 功能建议 / Feature Request
 about: 提出新功能或改进建议 / Suggest a new feature or improvement
-title: "[enhancement]"
-labels: enhancement
+title: "[功能增强]"
+labels: bug, enhancement
 assignees: tigerJX95
 type: Feature
 
