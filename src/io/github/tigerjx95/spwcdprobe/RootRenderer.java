@@ -8,7 +8,6 @@ import androidx.compose.ui.graphics.SkiaBackedPath_skikoKt;
 import androidx.compose.ui.geometry.Rect;
 import java.util.function.Supplier;
 import androidx.compose.ui.graphics.drawscope.*;
-import androidx.compose.ui.graphics.painter.Painter;
 import java.lang.reflect.Method;
 import java.lang.reflect.Constructor;
 /** Draws into our own full-width Canvas. Never invoked inside the native Image node. */
@@ -19,8 +18,14 @@ final class RootRenderer {
  private static final Constructor<Stroke> STROKE;
  private record Finish(float radius,Stroke line,Stroke edge,Brush hub,Brush metal,Brush innerLip,Stroke bevel,Stroke lip){}
  private static volatile Finish cachedFinish;
+ private record VinylFinish(float radius,Path grooves,Path label,Path hole,Path spindleInset,Stroke grooveStroke,Stroke rim,Brush surface,Brush groovesLight,Brush falloff){}
+ private static volatile VinylFinish cachedVinyl;
+ private static final Method BRUSH_PATH,SWEEP;
+
  static {
   try{
+   SWEEP=Brush.Companion.getClass().getMethod("sweepGradient-Uv8p0NA",kotlin.Pair[].class,long.class);
+   BRUSH_PATH=DrawScope.class.getMethod("drawPath-GBMwjPU",Path.class,Brush.class,float.class,DrawStyle.class,ColorFilter.class,int.class);
    CLIP_RECT=Canvas.class.getMethod("clipRect-N_I0leg",float.class,float.class,float.class,float.class,int.class);
    CLIP=Canvas.class.getMethod("clipPath-mtrdD-E",Path.class,int.class);
    CIRCLE=DrawScope.class.getMethod("drawCircle-VaOC9Bg",long.class,float.class,long.class,float.class,DrawStyle.class,ColorFilter.class,int.class);
@@ -29,8 +34,8 @@ final class RootRenderer {
    LINEAR=Brush.Companion.getClass().getMethod("linearGradient-mHitzGk",kotlin.Pair[].class,long.class,long.class,int.class);
    BOX_COLOR=androidx.compose.ui.graphics.Color.class.getMethod("box-impl",long.class);
    SIZE=DrawScope.class.getMethod("getSize-NH-jbRc");
-   INTRINSIC=Painter.class.getMethod("getIntrinsicSize-NH-jbRc");
-   DRAW=Painter.class.getMethod("draw-x_KDEd0",DrawScope.class,long.class,float.class,ColorFilter.class);
+   INTRINSIC=PainterDrawBinding.INTRINSIC_SIZE;
+   DRAW=PainterDrawBinding.METHOD;
    STROKE=Stroke.class.getConstructor(float.class,float.class,int.class,int.class,androidx.compose.ui.graphics.PathEffect.class,kotlin.jvm.internal.DefaultConstructorMarker.class);
   }catch(Exception e){throw new ExceptionInInitializerError(e);}
  }
@@ -53,13 +58,16 @@ final class RootRenderer {
   draw(scope,painter,enter,leave,disc,exposure,amount,front,layer,angle,false);
  }
  static void draw(DrawScope scope,Object painter,Runnable enter,Runnable leave,Disc disc,float exposure,int amount,boolean front,FrontDiscLayer layer,float angle,boolean blank)throws Exception{
+  draw(scope,painter,enter,leave,disc,exposure,amount,front,layer,angle,blank,false);
+ }
+ static void draw(DrawScope scope,Object painter,Runnable enter,Runnable leave,Disc disc,float exposure,int amount,boolean front,FrontDiscLayer layer,float angle,boolean blank,boolean vinyl)throws Exception{
   long intrinsic=(Long)INTRINSIC.invoke(painter);float iw=x(intrinsic),ih=y(intrinsic);
   if(!Float.isFinite(iw)||!Float.isFinite(ih)||iw<=0||ih<=0){iw=ih=1;}
   final float ratio=iw/ih;
   paint(scope,ratio,new Source(){
    public void draw(DrawScope s,float w,float h)throws Exception{enter.run();try{DRAW.invoke(painter,s,pack(w,h),1f,null);}finally{leave.run();}}
    public boolean blankDisc(){return blank;}
-  },disc,SkiaBackedPath_skikoKt::Path,exposure,amount,front,layer,angle);
+  },disc,SkiaBackedPath_skikoKt::Path,exposure,amount,front,layer,angle,vinyl);
  }
  static void paint(DrawScope scope,float aspect,Source source)throws Exception{paint(scope,aspect,source,(s,x,y,d)->false);}
  static void paint(DrawScope scope,float aspect,Source source,Disc disc)throws Exception{
@@ -81,6 +89,9 @@ final class RootRenderer {
   paint(scope,aspect,source,disc,paths,exposure,amount,front,layer,0f);
  }
  static void paint(DrawScope scope,float aspect,Source source,Disc disc,Supplier<Path> paths,float exposure,int amount,boolean front,FrontDiscLayer layer,float angle)throws Exception{
+  paint(scope,aspect,source,disc,paths,exposure,amount,front,layer,angle,false);
+ }
+ static void paint(DrawScope scope,float aspect,Source source,Disc disc,Supplier<Path> paths,float exposure,int amount,boolean front,FrontDiscLayer layer,float angle,boolean vinyl)throws Exception{
   exposure=Math.max(0,Math.min(1,exposure));
   long size=(Long)SIZE.invoke(scope);float w=x(size),h=y(size),side=Math.min(h,w/DiscExposure.widthFactor(amount));
   if(side<=0||!Float.isFinite(side))return;
@@ -98,6 +109,8 @@ final class RootRenderer {
    try{
     if(angle!=0f){moving.translate(cx,cy);moving.rotate(angle);moving.translate(-cx,-cy);}
   if(!disc.draw(scope,cx,cy,r*2f)){
+   if(vinyl)vinylFace(scope,source,aspect,cx,cy,r,paths,angle);
+   else{
    Canvas canvas=scope.getDrawContext().getCanvas();canvas.save();
    try{
     Path outer=paths.get();outer.addOval(new Rect(cx-r,cy-r,cx+r,cy+r),Path.Direction.Clockwise);
@@ -114,11 +127,75 @@ final class RootRenderer {
    CIRCLE.invoke(scope,ColorKt.Color(0x18ffffff),r*.125f,pack(cx,cy),1f,Fill.INSTANCE,null,3);
    // Keep the tiny spindle highlight.
    CIRCLE.invoke(scope,ColorKt.Color(0xccffffff),Math.max(.65f,r*.0075f),pack(cx,cy),1f,Fill.INSTANCE,null,3);
+   }
   }
    }finally{moving.restore();if(blended)moving.restore();}
    }
   }finally{moving.restore();}
   if(!front)cover(scope,aspect,source,side);
+ }
+ private static Path oval(Supplier<Path> paths,float radius){
+  Path path=paths.get();
+  path.addOval(new Rect(-radius,-radius,radius,radius),Path.Direction.Clockwise);
+  return path;
+ }
+ private static VinylFinish vinylFinish(float radius,Supplier<Path> paths)throws Exception{
+  VinylFinish finish=cachedVinyl;
+  if(finish!=null&&finish.radius()==radius)return finish;
+  Path grooves=paths.get();
+  for(int ring=0;ring<42;ring++){
+   float r=radius*(.395f+ring*.0141f);
+   grooves.addOval(new Rect(-r,-r,r,r),Path.Direction.Clockwise);
+  }
+  // Broad reflections above and below the hub, separated by near-black flanks.
+  float[] angles={0,1/12f,1/6f,1/4f,1/3f,5/12f,.5f,7/12f,2/3f,.75f,5/6f,11/12f,1};
+  Brush surface=(Brush)SWEEP.invoke(Brush.Companion,grayStops(angles,new int[]{12,21,40,63,40,21,11,19,37,60,38,21,12}),pack(0,0));
+  Brush groovesLight=(Brush)SWEEP.invoke(Brush.Companion,grayStops(angles,new int[]{18,28,52,85,52,28,17,25,49,81,50,28,18}),pack(0,0));
+  float[] stops={0,.38f,.54f,.71f,.87f,.98f,1};
+  int[] colors={0x00000000,0x00000000,0x00000000,0x12000000,0x27000000,0x45000000,0x45000000};
+  kotlin.Pair<?,?>[] shading=new kotlin.Pair<?,?>[stops.length];
+  for(int i=0;i<stops.length;i++)shading[i]=new kotlin.Pair<>(stops[i],BOX_COLOR.invoke(null,ColorKt.Color(colors[i])));
+  Brush falloff=(Brush)RADIAL.invoke(Brush.Companion,shading,pack(0,0),radius,0);
+  return cachedVinyl=new VinylFinish(radius,grooves,oval(paths,radius*.375f),oval(paths,radius*.029f),oval(paths,radius*.038f),
+      stroke(radius*.0065f),stroke(radius*.018f),surface,groovesLight,falloff);
+ }
+ private static kotlin.Pair<?,?>[] grayStops(float[] stops,int[] levels)throws Exception{
+  kotlin.Pair<?,?>[] values=new kotlin.Pair<?,?>[stops.length];
+  for(int i=0;i<stops.length;i++)values[i]=new kotlin.Pair<>(stops[i],BOX_COLOR.invoke(null,ColorKt.Color(0xff000000|levels[i]*0x010101)));
+  return values;
+ }
+ private static void vinylFace(DrawScope scope,Source source,float aspect,float cx,float cy,float radius,Supplier<Path> paths,float angle)throws Exception{
+  VinylFinish finish=vinylFinish(radius,paths);
+  Canvas canvas=scope.getDrawContext().getCanvas();canvas.save();
+  try{
+   canvas.translate(cx,cy);
+   CLIP.invoke(canvas,finish.hole(),0);
+   long center=pack(0,0);
+   canvas.save();
+   try{
+    // The label rotates with the record, while the reflected light stays fixed.
+    if(angle!=0f)canvas.rotate(-angle);
+    BRUSH_CIRCLE.invoke(scope,finish.surface(),radius,center,1f,Fill.INSTANCE,null,3);
+    BRUSH_PATH.invoke(scope,finish.grooves(),finish.groovesLight(),1f,finish.grooveStroke(),null,3);
+    BRUSH_CIRCLE.invoke(scope,finish.falloff(),radius,center,1f,Fill.INSTANCE,null,3);
+   }finally{canvas.restore();}
+   circle(scope,0xff363636,radius-finish.rim().getWidth()*.5f,center,finish.rim());
+   CIRCLE.invoke(scope,ColorKt.Color(0xff101010),radius*.386f,center,1f,Fill.INSTANCE,null,3);
+   CIRCLE.invoke(scope,ColorKt.Color(0xff252525),radius*.375f,center,1f,Fill.INSTANCE,null,3);
+   if(!source.blankDisc()){
+    canvas.save();
+    try{
+     CLIP.invoke(canvas,finish.label(),1);
+     CLIP.invoke(canvas,finish.spindleInset(),0);
+     float size=radius*.75f;
+     float w=size*Math.max(1f,aspect),h=size*Math.max(1f,1f/aspect);
+     canvas.translate(-w*.5f,-h*.5f);
+     source.draw(scope,w,h);
+    }finally{canvas.restore();}
+   }
+   // Fill the annulus up to the cutout so label colors cannot show between the rim and hole.
+   CIRCLE.invoke(scope,ColorKt.Color(0xffdedede),radius*.042f,center,1f,Fill.INSTANCE,null,3);
+  }finally{canvas.restore();}
  }
  private static void blankFace(DrawScope scope,float r,float cx,float cy)throws Exception{
   // Uniform light silver-gray face: the reference has no directional light band.

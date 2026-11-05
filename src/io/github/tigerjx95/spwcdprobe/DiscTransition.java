@@ -74,9 +74,18 @@ final class DiscTransition {
   return old!=exposure||oldScale!=scale||oldCentered!=centered||before!=phase;
  }
  private void finish(){
-  exposure=0;phase=Phase.FINISHED;
+  exposure=0;centered=1;phase=Phase.FINISHED;
   Runnable done=completion;completion=null; // Clear before re-entrant host callbacks.
   if(done!=null)done.run();
+ }
+ // The timer may stop waiting for the eased tail only when every remaining
+ // displacement is below a physical pixel. Normal tick() timing stays exact;
+ // callers without measured geometry retain the full animation duration.
+ boolean finishSubpixelReturn(long now,float travelPixels){
+  if(phase!=Phase.CLOSING||now-started<=brakeDuration||!Float.isFinite(travelPixels)||travelPixels<=0)return false;
+  float remaining=Math.max(exposure,1-centered)*travelPixels;
+  if(remaining>.75f)return false;
+  finish();return true;
  }
  private static float unit(long elapsed,long duration){return duration<=0?1:Math.max(0,Math.min(1,(float)((double)elapsed/duration)));}
  private static float smoother(float t){double u=t;return (float)Math.max(0,Math.min(1,u*u*u*(u*(u*6-15)+10)));}

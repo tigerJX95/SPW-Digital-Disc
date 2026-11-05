@@ -1,5 +1,5 @@
 import zipfile,struct,json,sys,collections
-z=zipfile.ZipFile(sys.argv[1]); target_words=('PlayerScreen.kt','PlayerLyrics.kt')
+target_words=('PlayerScreen.kt','PlayerLyrics.kt')
 def parse(data):
  p=8; n=struct.unpack_from('>H',data,p)[0];p+=2; cp=[None]*n;i=1
  while i<n:
@@ -53,18 +53,23 @@ def scan(b,cp,cls,utf):
   else:step=wide2.get(op,3 if op in wide3 else 1)
   pos+=step
  return out
-all_methods=[];targets=[];bad=0
-for entry in z.infolist():
- if not entry.filename.endswith('.class'):continue
- try:
-  name,methods,marker=parse(z.read(entry));all_methods.extend((name,entry.filename,m) for m in methods)
-  if marker:targets.append({'entry':entry.filename,'internal_name':name,'methods':[{'name':m['method'],'desc':m['descriptor']} for m in methods if 'Landroidx/compose/runtime/Composer;' in m['descriptor']]})
- except Exception as e:
-  bad+=1
-  if bad<5:print(entry.filename,repr(e),file=sys.stderr)
-owners={t['internal_name'] for t in targets};incoming=[]
-for name,path,m in all_methods:
- for c in m['calls']:
-  if c['owner'] in owners:incoming.append({'caller_class':name,'caller_entry':path,'caller_method':m['method'],'caller_descriptor':m['descriptor'],**c})
-result={'class_count':sum(x.filename.endswith('.class') for x in z.infolist()),'parse_errors':bad,'source_marker_classes':targets,'actual_invoke_edges':incoming}
-print(json.dumps(result,ensure_ascii=False,indent=2))
+def main():
+ with zipfile.ZipFile(sys.argv[1]) as z:
+  all_methods=[];targets=[];bad=0
+  for entry in z.infolist():
+   if not entry.filename.endswith('.class'):continue
+   try:
+    name,methods,marker=parse(z.read(entry));all_methods.extend((name,entry.filename,m) for m in methods)
+    if marker:targets.append({'entry':entry.filename,'internal_name':name,'methods':[{'name':m['method'],'desc':m['descriptor']} for m in methods if 'Landroidx/compose/runtime/Composer;' in m['descriptor']]})
+   except Exception as e:
+    bad+=1
+    if bad<5:print(entry.filename,repr(e),file=sys.stderr)
+  owners={t['internal_name'] for t in targets};incoming=[]
+  for name,path,m in all_methods:
+   for c in m['calls']:
+    if c['owner'] in owners:incoming.append({'caller_class':name,'caller_entry':path,'caller_method':m['method'],'caller_descriptor':m['descriptor'],**c})
+  result={'class_count':sum(x.filename.endswith('.class') for x in z.infolist()),'parse_errors':bad,'source_marker_classes':targets,'actual_invoke_edges':incoming}
+  print(json.dumps(result,ensure_ascii=False,indent=2))
+
+if __name__ == '__main__':
+ main()

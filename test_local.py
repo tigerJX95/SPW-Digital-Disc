@@ -23,9 +23,9 @@ subprocess.run([str(javac), '--release', '21', '-encoding', 'UTF-8', '-cp', clas
 classpath = os.pathsep.join(map(str, [output, classes, host]))
 tests = [
     'CoverAvailabilityTest', 'BlankDiscTest', 'CoverSelectionTest', 'CoverRecoveryTest', 'DiscTransitionTest', 'TrackEntryGateTest', 'GeneratedDiscFinishTest',
-    'LocalDiscServiceTest', 'LocalDiscFixTest', 'DiscArtworkTest', 'DiscGenerationTest', 'LocalDiscReuseTest', 'LocalDiscRetryTest',
+    'LocalDiscServiceTest', 'LocalDiscFixTest', 'DiscArtworkTest', 'HighResolutionArtworkTest', 'ReturnHandoffTest', 'CrossAlbumCacheTest', 'DiscGenerationTest', 'LocalDiscReuseTest', 'LocalDiscRetryTest',
     'ProductionResumeTest', 'ProductionLayoutRecoveryTest', 'ObservableHandoffTest', 'ProductionRotationHandoffTest',
-    'HostEntryTest', 'HostImageDrawTest', 'RootRasterTest', 'CoverDiscTest',
+    'HostEntryTest', 'HostImageDrawTest', 'RootRasterTest', 'VinylRendererTest', 'CoverDiscTest',
     'LocalDiscRasterTest', 'DiscMotionRasterTest', 'ReflectionTest', 'RevealOrderTest',
     'RevealCycleTest', 'DiscExposureTest', 'DiscSettingsTest', 'PreferenceSchemaTest', 'FrontSettingsTest', 'FrontRendererTest', 'FrontDiscMotionTest', 'DiscRotationTest', 'RotationSettingsTest', 'RotationRendererTest', 'DiscMotionContinuityTest', 'TimedDiscMotionRasterTest', 'RotationHandoffTest', 'HostCompatibilityTest', 'PluginSourceMetadataTest', 'HostBindingsTest',
 ]

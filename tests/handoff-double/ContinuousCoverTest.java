@@ -21,6 +21,7 @@ public class ContinuousCoverTest {
   field(type,"nativeRoot").set(frame,root);
   var observe=type.getDeclaredMethod("observe",String.class);observe.setAccessible(true);
   var resolve=type.getDeclaredMethod("resolveCover",Object.class);resolve.setAccessible(true);
+  var drawCover=type.getDeclaredMethod("drawCover",String.class,String.class,float.class);drawCover.setAccessible(true);
   var source=type.getDeclaredMethod("source");source.setAccessible(true);
   var suppress=type.getDeclaredMethod("suppress");suppress.setAccessible(true);
   var restore=type.getDeclaredMethod("restoreNative");restore.setAccessible(true);
@@ -34,7 +35,17 @@ public class ContinuousCoverTest {
   long now=1_000_000_000L;motion.enter();motion.ready(now);motion.tick(now+940_000_000L);gate.observe("album/0.flac",now);
   for(int i=1;i<=100;i++){
    String song="album/"+i+".flac";
+   String outgoing="album/"+(i-1)+".flac";
+   var settled=(CdPageProbePlugin.DrawCover)drawCover.invoke(frame,outgoing,outgoing,1f);
+   check(settled.cover()==pixels&&settled.exposed()==1f,"matching playback keeps cover and CD");
+   var racing=(CdPageProbePlugin.DrawCover)drawCover.invoke(frame,outgoing,song,1f);
+   check(racing!=null&&racing.painter()==painter&&racing.cover()==pixels&&racing.exposed()==0f,
+         "playback advanced after native suppression: still paint cover with no outgoing CD");
+   var unavailable=(CdPageProbePlugin.DrawCover)drawCover.invoke(frame,outgoing,null,1f);
+   check(unavailable.cover()==pixels&&unavailable.exposed()==0f,"unavailable playback retains cover with no CD");
    observe.invoke(frame,song); // First, the host still exposes the outgoing painter.
+   var waiting=(CdPageProbePlugin.DrawCover)drawCover.invoke(frame,song,song,1f);
+   check(waiting.cover()==pixels&&waiting.exposed()==0f,"pending cover cannot show a disc");
    check(field(type,"ownedCover").get(frame)==null,"old cover no longer qualifies as current");
    check(field(type,"pendingCover").get(frame)==pixels&&pixels.closes==0,"already displayed pixels stay alive");
    check(pass.getValue()==pixels&&(Boolean)suppress.invoke(frame),"native suppression never drops during observer-before-draw gap");
@@ -75,7 +86,7 @@ public class ContinuousCoverTest {
   observe.invoke(frame,(String)null);check(pixels.closes==1&&pass.getValue()==null,"no current media releases waiting pixels");
   DiscImage last=new DiscImage();field(type,"pendingCover").set(frame,last);
   restore.invoke(frame);check(last.closes==1&&field(type,"pendingCover").get(frame)==null&&pass.getValue()==null,"page exit releases retained image and restores native layer");
-  System.out.println("PASS real production Frame: 100 same-album delayed handoffs without native-layout gap, placeholder cannot eject, stationary cover, fresh-source atomic swap, exact disposal, rapid changes, no-media and page-exit cleanup");
+  System.out.println("PASS real production Frame: 100 playback-before- and playback-after-observer handoffs without native-layout gap, placeholder cannot eject, stationary cover, fresh-source atomic swap, exact disposal, rapid changes, no-media and page-exit cleanup");
   System.out.println("Native pixels and settled visibility are doubles; native Windows playback is outside this offline test.");
  }
 }

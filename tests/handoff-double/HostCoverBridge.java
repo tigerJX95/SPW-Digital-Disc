@@ -6,6 +6,9 @@ final class HostCoverBridge {
  record Decoded(DiscImage pixels){}
  record Image(Object painter,LayoutCoordinates coordinates,long area){}
  static List<Image> nodes=List.of();
+ static boolean anyPainter(LayoutCoordinates root,Object painter,java.util.function.Predicate<LayoutCoordinates> matches){
+  return images(root).stream().anyMatch(image->image.painter()==painter&&matches.test(image.coordinates()));
+ }
  static List<Image> images(LayoutCoordinates root){return nodes;}
  static boolean imageReady(Object painter){return painter instanceof Decoded;}
  static DiscImage capture(Object painter){return ((Decoded)painter).pixels();}

@@ -8,7 +8,7 @@ public class PreferenceSchemaTest {
   var parser=Class.forName(TestHost.parser()).getMethod("\u037f",String.class);
   var groups=(List<?>)parser.invoke(null,Files.readString(Path.of("preference_config.json")));
   check(groups.size()==1,"one native settings group");Object group=groups.get(0);
-  var items=(List<?>)group.getClass().getMethod("ԩ").invoke(group);check(items.size()==3,"exposure slider and two independent switches");
+  var items=(List<?>)group.getClass().getMethod("ԩ").invoke(group);check(items.size()==4,"exposure slider and three independent switches");
   Object slider=items.get(0);var type=slider.getClass();check(type.getName().equals(TestHost.model()+"$Ԫ"),"host recognizes actual seekbar model");
   check(type.getMethod("\u037f").invoke(slider).equals(DiscExposure.KEY),"schema and runtime use same key");
   check(type.getMethod("Ԭ").invoke(slider).equals("config.json"),"schema and runtime use same file");
@@ -21,6 +21,9 @@ public class PreferenceSchemaTest {
   Object rotation=items.get(2);var rt=rotation.getClass();
   check(rt.getMethod("\u037f").invoke(rotation).equals(DiscSettings.ROTATE_KEY),"rotation key");
   check(!(Boolean)rt.getMethod("Ԫ").invoke(rotation),"rotation defaults off");
-  System.out.println("PASS actual SPW preference_config.json parser: seekbar plus front/rotation switches, matching keys/file, 0-100 bounds/default50 and both switches default off");
+  Object vinyl=items.get(3);var vt=vinyl.getClass();
+  check(vt.getMethod("\u037f").invoke(vinyl).equals(DiscSettings.VINYL_KEY),"vinyl key");
+  check(!(Boolean)vt.getMethod("Ԫ").invoke(vinyl),"vinyl defaults off");
+  System.out.println("PASS actual SPW preference_config.json parser: seekbar plus front/rotation/vinyl switches, matching keys/file, 0-100 bounds/default50 and all switches default off");
  }
 }

@@ -11,6 +11,9 @@ import org.jetbrains.skia.Shader;
 import org.jetbrains.skia.Surface;
 import org.jetbrains.skia.Paint;
 import org.jetbrains.skia.Rect;
+import org.jetbrains.skia.ImageInfo;
+import org.jetbrains.skia.ColorType;
+import org.jetbrains.skia.ColorAlphaType;
 import java.lang.reflect.Method;
 /** Owns decoded local pixels. The service lock prevents close while drawing. */
 final class DiscImage implements AutoCloseable {
@@ -25,16 +28,21 @@ final class DiscImage implements AutoCloseable {
  private DiscImage(Bitmap bitmap){nativeBitmap=bitmap;this.bitmap=SkiaImageAsset_skikoKt.asComposeImageBitmap(bitmap);width=bitmap.getWidth();height=bitmap.getHeight();}
  static DiscImage decode(byte[] bytes,int width,int height)throws Exception{
   var prepared=DiscArtwork.prepare(bytes,width,height);
-  try{bytes=DiscArtwork.encode(prepared);width=height=prepared.getWidth();}finally{prepared.flush();}
+  try{bytes=DiscArtwork.pixels(prepared);width=height=prepared.getWidth();}finally{prepared.flush();}
   Bitmap bitmap=null;
-  try(Image image=Image.Companion.makeFromEncoded(bytes)){
-   if(image.getWidth()!=width||image.getHeight()!=height)throw new IllegalStateException("PNG dimensions changed");
-   bitmap=Bitmap.Companion.makeFromImage(image);DiscImage result=new DiscImage(bitmap);bitmap=null;return result;
+  try{
+   bitmap=new Bitmap();
+   if(!bitmap.installPixels(new ImageInfo(width,height,ColorType.BGRA_8888,ColorAlphaType.PREMUL),bytes,width*4))
+    throw new IllegalStateException("Cannot install disc pixels");
+   bitmap.setImmutable();
+   DiscImage result=new DiscImage(bitmap);bitmap=null;return result;
   }finally{if(bitmap!=null)bitmap.close();}
  }
  static DiscImage capture(Shader shader,float sourceWidth,float sourceHeight)throws Exception{
   if(shader==null||shader.isClosed())throw new IllegalStateException("Host shader is closed");
-  float factor=Math.min(1,2048f/Math.max(sourceWidth,sourceHeight));
+  if(!Float.isFinite(sourceWidth)||!Float.isFinite(sourceHeight)||sourceWidth<=0||sourceHeight<=0)
+   throw new IllegalArgumentException("Invalid host image dimensions");
+  float factor=Math.min(1,(float)DiscArtwork.MAX_SIDE/Math.max(sourceWidth,sourceHeight));
   int w=Math.max(1,Math.round(sourceWidth*factor)),h=Math.max(1,Math.round(sourceHeight*factor));
   Bitmap bitmap=null;
   try(Surface surface=Surface.Companion.makeRasterN32Premul(w,h);Paint paint=new Paint()){

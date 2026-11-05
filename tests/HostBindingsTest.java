@@ -6,8 +6,49 @@ import java.util.concurrent.atomic.AtomicInteger;
 import kotlin.Unit;
 public class HostBindingsTest {
  static void check(boolean b,String why){if(!b)throw new AssertionError(why);}
+ public static class Renamed {
+  public static long anotherName(int value){return value;}
+  public static int unrelated(int value){return value;}
+ }
+ public static class Ambiguous {
+  public static long first(int value){return value;}
+  public static long second(int value){return value;}
+ }
+ static void checkRenamedClasses(HostCompatibility.Profile profile, ClassLoader loader)throws Exception{
+  var archive=java.nio.file.Files.createTempFile("spw-renamed-classes", ".zip");
+  try{
+   try(var out=new java.util.zip.ZipOutputStream(java.nio.file.Files.newOutputStream(archive))){
+    var originals=java.util.List.of(profile.owner(),profile.caller(),profile.local());
+    for(int i=0;i<originals.size();i++){
+     String renamed="androidx/compose/ui/TestRenamed"+i;
+     try(var in=loader.getResourceAsStream(originals.get(i).replace('.','/')+".class")){
+      var reader=new net.bytebuddy.jar.asm.ClassReader(in);
+      var writer=new net.bytebuddy.jar.asm.ClassWriter(0);
+      reader.accept(new net.bytebuddy.jar.asm.ClassVisitor(net.bytebuddy.jar.asm.Opcodes.ASM9,writer){
+       @Override public void visit(int version,int flags,String name,String signature,String parent,String[] interfaces){
+        super.visit(version,flags,renamed,signature,parent,interfaces);
+       }
+      },0);
+      out.putNextEntry(new java.util.zip.ZipEntry(renamed+".class"));
+      out.write(writer.toByteArray());
+      out.closeEntry();
+     }
+    }
+   }
+   var targets=HostClassDiscovery.discover(archive);
+   check(targets.equals(new HostClassDiscovery.Targets("androidx.compose.ui.TestRenamed0",
+    "androidx.compose.ui.TestRenamed1","androidx.compose.ui.TestRenamed2")),"metadata resolves renamed class entries");
+  }finally{java.nio.file.Files.deleteIfExists(archive);}
+ }
  public static void main(String[] args)throws Exception{
+  check(HostBindings.uniqueStatic(Renamed.class,long.class,int.class).getName().equals("anotherName"),"signature resolves a renamed member");
+  try{
+   HostBindings.uniqueStatic(Ambiguous.class,long.class,int.class);
+   throw new AssertionError("ambiguous signatures must be rejected");
+  }catch(NoSuchMethodException expected){}
   var loader=HostBindingsTest.class.getClassLoader();var profile=HostCompatibility.current();var bindings=new HostBindings(profile,loader);
+  checkRenamedClasses(profile,loader);
+  check(bindings.caller.equals(profile.caller()),"discovered caller matches verified host");
   check(bindings.cover.getDeclaringClass().getName().equals(profile.owner()),"cover target uses detected profile");
   check(bindings.local.getDeclaringClass().getName().equals(profile.local()),"composition local uses same profile");
   var skips=new AtomicInteger();

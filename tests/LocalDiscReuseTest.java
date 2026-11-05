@@ -38,7 +38,11 @@ public class LocalDiscReuseTest {
   // Same bytes/size/time in another directory still must not match the key.
   Path other=b.resolve("cd.png");Files.write(other,Files.readAllBytes(higher));Files.setLastModifiedTime(other,Files.getLastModifiedTime(higher));
   int before=decodes.get();song.set(b1);service.request(b1);service.poll();var cross=LocalDiscServiceTest.get(service,b1);
-  check(cross!=replaced&&replaced.closed==1&&decodes.get()==before+1,"path is part of cache identity, even with equal size/time");
+  check(cross!=replaced&&replaced.closed==0&&decodes.get()==before+1,"different path decodes independently while valid prior album remains cached");
+  song.set(a1);service.request(a1);service.poll();
+  check(LocalDiscServiceTest.get(service,a1)==replaced&&decodes.get()==before+1,"A-B-A reuses the independently revalidated A image");
+  song.set(b1);service.request(b1);service.poll();
+  check(LocalDiscServiceTest.get(service,b1)==cross&&decodes.get()==before+1,"returning to B reuses its own cached image");
   // Rapid B -> A -> B may reuse a published B only after latest B revalidation.
   song.set(a1);service.request(a1);song.set(b1);service.request(b1);
   check(!service.isResolved(b1)&&LocalDiscServiceTest.get(service,b1)==null,"ABA does not immediately publish retained pixels");

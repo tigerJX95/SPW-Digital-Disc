@@ -16,15 +16,19 @@ public class RootRasterTest {
   record Saved(AffineTransform transform,java.awt.Shape clip,Graphics2D parent,BufferedImage layer,float alpha){}
   final ArrayDeque<Saved> saved=new ArrayDeque<>();int circles,sourceCalls;
   final Map<androidx.compose.ui.graphics.Path,java.awt.geom.Area> masks=new IdentityHashMap<>();
+  final Map<androidx.compose.ui.graphics.Path,Path2D.Float> outlines=new IdentityHashMap<>();
   androidx.compose.ui.graphics.Path path(){
    final java.awt.geom.Area area=new java.awt.geom.Area();
+   var outline=new Path2D.Float();
    var result=(androidx.compose.ui.graphics.Path)Proxy.newProxyInstance(androidx.compose.ui.graphics.Path.class.getClassLoader(),new Class[]{androidx.compose.ui.graphics.Path.class},(p,m,a)->{
     if(m.getName().equals("addOval")){
-     var r=(androidx.compose.ui.geometry.Rect)a[0];area.add(new java.awt.geom.Area(new Ellipse2D.Float(r.getLeft(),r.getTop(),r.getWidth(),r.getHeight())));return null;
+     var r=(androidx.compose.ui.geometry.Rect)a[0];
+     var ellipse=new Ellipse2D.Float(r.getLeft(),r.getTop(),r.getWidth(),r.getHeight());
+     area.add(new java.awt.geom.Area(ellipse));outline.append(ellipse,false);return null;
     }
     throw new AssertionError(m);
    });
-   masks.put(result,area);return result;
+   masks.put(result,area);outlines.put(result,outline);return result;
   }
   final Method toArgb;
   final Map<androidx.compose.ui.graphics.ImageBitmap,BufferedImage> images=new IdentityHashMap<>();
@@ -86,8 +90,18 @@ public class RootRasterTest {
       int sx=(int)(so>>>32),sy=(int)so,sw=(int)(ss>>>32),sh=(int)ss,dx=(int)(dest>>>32),dy=(int)dest,dw=(int)(ds>>>32),dh=(int)ds;
       graphics.drawImage(image,dx,dy,dx+dw,dy+dh,sx,sy,sx+sw,sy+sh,null);return null;
      }
+     case "drawPath-GBMwjPU"->{
+      var outline=outlines.get(a[0]);
+      if(outline==null||!(a[1] instanceof androidx.compose.ui.graphics.SweepGradient brush)||!(a[3] instanceof androidx.compose.ui.graphics.drawscope.Stroke stroke))
+       throw new AssertionError("expected vinyl grooves with sweep shading");
+      sweep(brush,new BasicStroke(stroke.getWidth()).createStrokedShape(outline));return null;
+     }
      case "drawCircle-V9BoPsw"->{
       circles++;
+      if(a[0] instanceof androidx.compose.ui.graphics.SweepGradient brush){
+       float r=(Float)a[1];
+       sweep(brush,new Ellipse2D.Float(-r,-r,2*r,2*r));return null;
+      }
       if(a[0] instanceof androidx.compose.ui.graphics.LinearGradient brush){
        long start=(Long)brush.getClass().getMethod("getStart-F1C5BW0$ui_graphics").invoke(brush),end=(Long)brush.getClass().getMethod("getEnd-F1C5BW0$ui_graphics").invoke(brush);
        var stops=brush.getStops$ui_graphics();var colors=brush.getColors$ui_graphics();
@@ -123,6 +137,27 @@ public class RootRasterTest {
      default->throw new AssertionError("unexpected DrawScope API "+m);
     }
    });
+  }
+  void sweep(androidx.compose.ui.graphics.SweepGradient brush,Shape shape)throws Exception{
+   var stops=brush.getStops$ui_graphics();
+   var colors=brush.getColors$ui_graphics();
+   var unbox=androidx.compose.ui.graphics.Color.class.getMethod("unbox-impl");
+   int[] palette=new int[colors.size()];
+   for(int i=0;i<palette.length;i++)palette[i]=(Integer)toArgb.invoke(null,unbox.invoke(colors.get(i)))&255;
+   var layer=(Graphics2D)graphics.create();
+   try{
+    layer.clip(shape);
+    double r=Math.max(width,height);
+    int stop=0;
+    for(int degree=0;degree<360;degree+=2){
+     float fraction=(degree+1)/360f;
+     while(stops.get(stop+1)<fraction)stop++;
+     float t=(fraction-stops.get(stop))/(stops.get(stop+1)-stops.get(stop));
+     int shade=Math.round(palette[stop]+t*(palette[stop+1]-palette[stop]));
+     layer.setColor(new Color(shade,shade,shade));
+     layer.fill(new Arc2D.Double(-r,-r,2*r,2*r,-degree,-2.1,Arc2D.PIE));
+    }
+   }finally{layer.dispose();}
   }
   void source(DrawScope scope,float w,float h){
    sourceCalls++;

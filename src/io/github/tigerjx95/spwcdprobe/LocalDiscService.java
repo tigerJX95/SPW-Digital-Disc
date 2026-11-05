@@ -19,20 +19,24 @@ final class LocalDiscService<T extends AutoCloseable> implements AutoCloseable {
  private record Rejected(Stamp stamp,long retryAt){}
  private final Map<Path,Rejected> rejected=new LinkedHashMap<>();
  private final LongSupplier clock;
- private record Stamp(Path path,long size,java.nio.file.attribute.FileTime modified){}
+ private record Stamp(Path path,long size,java.nio.file.attribute.FileTime modified,java.nio.file.attribute.FileTime created,Object key){}
  private final Supplier<String> song;
  private final Decoder<T> decoder;
  private final Runnable changed;
  private final Consumer<String> log;
  private final Object lock=new Object();
  private ScheduledExecutorService worker;
- private String requestedSong,publishedSong,lastDiagnostic="";
+ private volatile String requestedSong;
+ private String publishedSong,lastDiagnostic="";
  private Stamp publishedStamp;
  private T asset;
- // One unpublished candidate only. Reuse requires a fresh ordered file lookup;
- // a song request never makes these retained pixels drawable by itself.
- private T cachedAsset;
- private Stamp cachedStamp;
+ // Cache owns all assets, including the current publication. No cache entry
+ // becomes drawable until the latest song's ordered metadata lookup succeeds.
+ static final int CACHE_ENTRIES=4;
+ static final long CACHE_BYTES=32L*1024*1024;
+ private record Cached<A>(A value,long bytes){}
+ private final LinkedHashMap<Stamp,Cached<T>> cache=new LinkedHashMap<>(8,.75f,true);
+ private long cacheBytes;
  private String resolvedSong;
  private boolean resolved;
  private volatile boolean closed;
@@ -75,15 +79,13 @@ final class LocalDiscService<T extends AutoCloseable> implements AutoCloseable {
  }
  // UI song observations invalidate in-flight decode, including A -> B -> A.
  void request(String current){
+  if(closed||Objects.equals(current,requestedSong))return;
   synchronized(lock){
    if(closed||Objects.equals(current,requestedSong))return;
-   requestedSong=current;generation++;nextScan=0;
+   generation++;nextScan=0;
    if(current==null||current.isBlank()){clearLocked();clearCacheLocked();rejected.clear();}
-   else if(asset!=null){
-    clearCacheLocked();cachedAsset=asset;cachedStamp=publishedStamp;
-    asset=null;publishedSong=null;publishedStamp=null;
-   }
-   resolved=false;changed.run();
+   else clearLocked();
+   resolved=false;requestedSong=current;changed.run();
   }
  }
  void poll(){
@@ -102,19 +104,25 @@ final class LocalDiscService<T extends AutoCloseable> implements AutoCloseable {
    if(closed||!Objects.equals(current,song.get()))return;
    Path file=directory.resolve(name);Stamp observed=null;
    try{
-    if(!Files.isRegularFile(file))continue;
+    if(!Files.isRegularFile(file)){
+     synchronized(lock){evictPathLocked(file,null);}
+     continue;
+    }
     Stamp stamp=stamp(file);observed=stamp;
     synchronized(lock){
      if(closed||ticket!=generation||!Objects.equals(current,requestedSong)||!Objects.equals(current,song.get()))return;
+     evictPathLocked(file,stamp);
      Rejected failed=rejected.get(file);
      // Recheck metadata on every scan. A replacement bypasses the cooldown;
      // unchanged failures are retried later so transient decoder errors recover.
      if(failed!=null&&stamp.equals(failed.stamp())&&now-failed.retryAt()<0)continue;
      rejected.remove(file);
      if(Objects.equals(current,publishedSong)&&stamp.equals(publishedStamp)&&asset!=null)return;
-     if(cachedAsset!=null&&stamp.equals(cachedStamp)){
-      clearLocked();asset=cachedAsset;cachedAsset=null;cachedStamp=null;
-      publishedSong=current;publishedStamp=stamp;resolvedSong=current;resolved=true;changed.run();return;
+     Cached<T> cached=cache.get(stamp);
+     if(cached!=null){
+      clearLocked();asset=cached.value();
+      publishedSong=current;publishedStamp=stamp;resolvedSong=current;resolved=true;changed.run();
+      diagnostic("LOCAL_CD_CACHE_HIT "+file);return;
      }
     }
     if(stamp.size()>MAX_BYTES||stamp.size()<24)throw new IOException("image size limit");
@@ -129,7 +137,19 @@ final class LocalDiscService<T extends AutoCloseable> implements AutoCloseable {
     catch(Exception error){closeAsset(decoded);throw error;}
     synchronized(lock){
      if(closed||ticket!=generation||!Objects.equals(current,requestedSong)||!Objects.equals(current,song.get())){closeAsset(decoded);return;}
-     clearLocked();clearCacheLocked();asset=decoded;publishedSong=current;publishedStamp=stamp;resolvedSong=current;resolved=true;changed.run();
+     clearLocked();
+     // Keep one selected image per directory. Replacing a higher/lower priority
+     // candidate retires the old selection while unrelated albums stay cached.
+     for(var it=cache.entrySet().iterator();it.hasNext();){
+      var entry=it.next();
+      if(Objects.equals(entry.getKey().path().getParent(),directory))removeLocked(it,entry.getValue());
+     }
+     int side=Math.min(DiscArtwork.MAX_SIDE,Math.max(dimensions[0],dimensions[1]));
+     long cost=4L*side*side;cache.put(stamp,new Cached<>(decoded,cost));cacheBytes+=cost;
+     while(cache.size()>CACHE_ENTRIES||cacheBytes>CACHE_BYTES){
+      var it=cache.entrySet().iterator();var entry=it.next();removeLocked(it,entry.getValue());
+     }
+     asset=decoded;publishedSong=current;publishedStamp=stamp;resolvedSong=current;resolved=true;changed.run();
     }
     found=true;diagnostic("LOCAL_CD_READY "+file+" "+dimensions[0]+"x"+dimensions[1]);return;
    }catch(Exception|LinkageError e){
@@ -146,7 +166,10 @@ final class LocalDiscService<T extends AutoCloseable> implements AutoCloseable {
   if(!found)finishDefault(current,ticket);
   diagnostic("LOCAL_CD_DEFAULT no usable cd.png/cd.jpg/disc.png/disc.jpg; directory="+directory);
  }
- private static Stamp stamp(Path file)throws IOException{return new Stamp(file,Files.size(file),Files.getLastModifiedTime(file));}
+ private static Stamp stamp(Path file)throws IOException{
+  var attrs=Files.readAttributes(file,java.nio.file.attribute.BasicFileAttributes.class);
+  return new Stamp(file,attrs.size(),attrs.lastModifiedTime(),attrs.creationTime(),attrs.fileKey());
+ }
  static int[] dimensions(byte[] bytes)throws IOException{
   byte[] signature={(byte)137,80,78,71,13,10,26,10};
   if(bytes.length>MAX_BYTES||bytes.length<24)throw new IOException("image size limit");
@@ -167,7 +190,7 @@ final class LocalDiscService<T extends AutoCloseable> implements AutoCloseable {
   synchronized(lock){
    if(closed||ticket!=generation||!Objects.equals(current,requestedSong)||!Objects.equals(current,song.get()))return;
    boolean notify=!resolved||!Objects.equals(current,resolvedSong)||asset!=null;
-   clearLocked();clearCacheLocked();resolvedSong=current;resolved=true;if(notify)changed.run();
+   clearLocked();resolvedSong=current;resolved=true;if(notify)changed.run();
   }
  }
  // false means lookup completed without usable artwork; true means local image
@@ -189,11 +212,24 @@ final class LocalDiscService<T extends AutoCloseable> implements AutoCloseable {
   }
  }
  void discard(String currentSong){
-  synchronized(lock){if(Objects.equals(currentSong,publishedSong)){clearLocked();changed.run();}}
+  synchronized(lock){if(Objects.equals(currentSong,publishedSong)){Path path=publishedStamp.path();evictPathLocked(path,null);changed.run();}}
   diagnostic("LOCAL_CD_DEFAULT image draw failed");
  }
- private void clearLocked(){T previous=asset;asset=null;publishedSong=null;publishedStamp=null;closeAsset(previous);}
- private void clearCacheLocked(){T previous=cachedAsset;cachedAsset=null;cachedStamp=null;closeAsset(previous);}
+ private void clearLocked(){asset=null;publishedSong=null;publishedStamp=null;}
+ private void removeLocked(Iterator<?> iterator,Cached<T> entry){
+  iterator.remove();cacheBytes-=entry.bytes();
+  if(asset==entry.value())clearLocked();
+  closeAsset(entry.value());
+ }
+ private void evictPathLocked(Path path,Stamp keep){
+  for(var it=cache.entrySet().iterator();it.hasNext();){
+   var entry=it.next();
+   if(entry.getKey().path().equals(path)&&!entry.getKey().equals(keep))removeLocked(it,entry.getValue());
+  }
+ }
+ private void clearCacheLocked(){
+  for(Cached<T> entry:cache.values())closeAsset(entry.value());cache.clear();cacheBytes=0;
+ }
  private void closeAsset(T value){if(value!=null)try{value.close();}catch(Exception ignored){}}
  private void diagnostic(String value){if(!value.equals(lastDiagnostic)){lastDiagnostic=value;log.accept(value);}}
  @Override public void close(){

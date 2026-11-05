@@ -7,8 +7,9 @@ import javax.swing.SwingUtilities;
 final class DiscSettings implements AutoCloseable {
  static final String FRONT_KEY="disc_in_front";
  static final String ROTATE_KEY="disc_rotation";
- record Values(int amount,boolean front,boolean rotate){}
- static final Values DEFAULT=new Values(DiscExposure.DEFAULT,false,false);
+ static final String VINYL_KEY="disc_vinyl";
+ record Values(int amount,boolean front,boolean rotate,boolean vinyl){}
+ static final Values DEFAULT=new Values(DiscExposure.DEFAULT,false,false,false);
  private final ConfigManager manager;
  private final Consumer<Values> update;
  private final AtomicLong revision=new AtomicLong();
@@ -30,7 +31,10 @@ final class DiscSettings implements AutoCloseable {
   boolean rotate;
   try{Object value=config.get(ROTATE_KEY,false);rotate=Boolean.TRUE.equals(value)||value instanceof String text&&text.equalsIgnoreCase("true");}
   catch(RuntimeException invalid){rotate=false;}
-  return new Values(amount,front,rotate);
+  boolean vinyl;
+  try{Object value=config.get(VINYL_KEY,false);vinyl=Boolean.TRUE.equals(value)||value instanceof String text&&text.equalsIgnoreCase("true");}
+  catch(RuntimeException invalid){vinyl=false;}
+  return new Values(amount,front,rotate,vinyl);
  }
  private void changed(ConfigHelper config){
   if(!active)return;

@@ -4,9 +4,11 @@
 
 Adds a digital CD presentation to Salt Player for Windows (SPW), with a complete album cover and a CD extending from its right side.
 
-Current version: **v1.2.1**. Includes interface mappings for **SPW 1.19.0 and 1.19.3 Microsoft Store**; see the compatibility table below for validation status.
+Current version: **v1.3.0**. Includes interface mappings for **SPW 1.19.0 and 1.19.3 Microsoft Store**; see the compatibility table below for validation status.
 
-V1.2.1 adds a silver-white blank CD when no usable album cover is available, reusing the existing rim, metallic hub, translucent hole and spindle. Failed local disc reads are throttled to reduce repeated decoding. The blank face uses a uniform light silver-gray tone to separate it from the narrow white rim.
+Enable the vinyl default artwork setting to show dark record grooves and a circular album label when no custom disc artwork is available. This setting is off by default.
+
+V1.3 improves local disc image processing with direct premultiplied pixel transfer instead of intermediate PNG encoding and a second decode, plus faster transparency scanning and a bounded cross-album custom-artwork cache. The V1.2.1 uniform silver-gray blank disc and hub are retained. Fixed occasional blank cover frames and flashes of the previous disc during rapid track changes. Improved the transition from the enlarged cover back to the smaller cover on the left after the disc retracts.
 
 [Update history](CHANGELOG.md) (Chinese)
 
@@ -29,6 +31,7 @@ I wanted to bring this digital record experience to Salt Player: enjoying the co
 - **Transparent images**: local PNG files retain their existing transparent backgrounds and center holes. An antialiased circular outer mask is applied. No extra center hole or hub ring is added.
 - **Front-disc display**: enable the native plugin switch to draw the disc over the cover. Off by default. Front mode uses whole-disc motion with a short uniform fade. Compare at exposure 50; in front mode exposure controls horizontal travel, while 0 still shows only the cover.
 - **Disc exposure setting**: open SPW Digital Disc settings in the plugin manager and adjust 0–100. Default 50 preserves the existing view; 100 shows the full disc. The host saves the value. The group fits the window, and cover-only mode returns without a retract delay.
+- **Cross-album disc cache**: keeps up to 4 custom images under a combined 32 MiB normalized-pixel budget, including the active image. Least recently used entries are evicted. Candidate priority, file size, modification time and available file identity are checked before reuse; changed or deleted files are invalidated. Disabling the plugin or clearing current media releases the cache. Generated cover discs continue to use the host’s valid cover result.
 - **Playback-linked rotation**: enable “Rotate while playing” to start gently over about 240 ms after ejection, then rotate once every 20 seconds. Pause and retraction freeze the angle; resume starts gently from that angle. Off by default; the cover stays still.
 - **Page animations**: the cover enlarges first, then the CD gradually slides out from behind it. Clicking the combined display to return retracts the CD before invoking the native return action. The reflection follows the same animation progress. Normal track changes replay the eject animation without rescaling the cover; rapid changes eject only the last stably selected song's disc.
 - **Combined reflection**: the cover and CD have a short reflection that fades downward.
@@ -48,13 +51,13 @@ Current interface mappings cover **SPW 1.19.0 and 1.19.3 Microsoft Store**. The 
 4. Play a local song. Click the bottom playback bar to open the primary detail page, then click the album cover to open the secondary display page.
 5. On the secondary page, click the combined cover/CD display to return. The CD retracts before the primary page returns. You can also return while the CD is sliding out; repeated clicks do not queue multiple return actions.
 
-Normal ejection takes about 700 ms and full retraction about 650 ms, with quintic easing at the endpoints. Returning during ejection preserves the current pose and brakes for up to about 80 ms before retracting, without passing the original endpoint. Returning from a fully open disc adds no braking delay.
+Normal ejection takes about 700 ms and full retraction up to about 650 ms, with quintic easing at the endpoints. A final displacement below one physical pixel can complete early before invoking native return. Returning during ejection preserves the current pose and brakes for up to about 80 ms before retracting, without passing the original endpoint. Returning from a fully open disc adds no braking delay.
 
 After a track change, the plugin waits for a selection-stability interval of about 280 ms and for the cover and disc lookup to be ready before ejecting the disc. Further track changes during this interval replace the pending request; intermediate songs are not replayed in sequence. Once a cover source takes over, old nodes from that transition cannot overwrite it. When the page is collapsed to the playback bar and reopened, the plugin waits until the host has fully expanded before replaying the cover-first entry and disc eject animations. The expansion process does not consume the disc animation's time.
 
-Collapsing the entire playback detail page or disabling the plugin cancels unfinished animations and delayed return actions, preventing remnants from appearing over the mini player. Different return paths and rapid interactions still leave room for improvement.
+Collapsing the entire playback detail page or disabling the plugin cancels unfinished animations and delayed return actions, preventing remnants from appearing over the mini player.
 
-The current installation package is `SPW_Digital_Disc_v1.2.1.spmod`. The source ZIP is for development and building; choose the `.spmod` file when installing.
+The current installation package is `SPW_Digital_Disc_v1.3.0.spmod`. The source ZIP is for development and building; choose the `.spmod` file when installing.
 
 ## Where to put local disc images
 
@@ -70,6 +73,8 @@ Place the disc image in **the same directory as the audio file**. For example, i
 If all four files exist and are readable, `cd.png` is used. Use the lowercase filenames shown above. Songs in the same directory share that disc image. The plugin does not currently search parent directories or subdirectories, support custom disc image paths, or download disc artwork automatically.
 
 For a transparent background or center hole, use a PNG with those transparent areas already prepared.
+
+The main supported and tested range is **1000 × 1000 to 4000 × 4000 pixels**, including 3000 × 3000 custom PNG artwork. Display copies are capped at **2048 × 2048 pixels**; smaller images are not upscaled and originals are unchanged. Generated discs use an independent host-cover snapshot. Custom artwork is normalized in the background and reused across same-directory track changes or returns to another album after file validation. The budget covers retained custom-artwork pixels only, excluding temporary decoding allocations, host covers and other player memory. Images over 32 MiB, 8192 pixels on either side, or 16 Mi pixels in total are rejected. Images above 4000 × 4000 pixels fall outside the main supported and tested range.
 
 ## Prepare local CD artwork (optional)
 
@@ -101,13 +106,12 @@ Front mode moves the complete disc with a short uniform fade at entry and exit. 
 
 Only the disc rotates; the cover stays upright and the reflection shares the angle. Each start accelerates smoothly from rest over about 240 ms, then maintains a 20-second period. Pausing or starting retraction freezes the current angle immediately. Playback resumes gently from that angle without replaying paused time. A new track starts upright. Ejection, retraction and exposure 0 do not rotate. Collapsing the secondary page to the mini player freezes the angle; reopening resumes after ejection completes. Returning to the primary page ends that presentation, so entering the secondary page again starts upright. Disabling rotation restores the upright orientation.
 
-## SPW host compatibility
+## Verified SPW host versions
 
-| SPW host | Interface mapping | V1.2.1 offline regression |
+| SPW host | Interface mapping | V1.3 offline regression |
 | --- | --- | --- |
-| 1.19.0 Microsoft Store | Adapted | 43 programs pass |
-| 1.19.3 Microsoft Store | Adapted | 43 programs pass |
-| Other versions or distributions | Unverified | Unverified |
+| 1.19.0 Microsoft Store | Adapted | 46 programs pass |
+| 1.19.3 Microsoft Store | Adapted | 46 programs pass |
 
 Offline tests cover interface resolution, cover calls, configuration storage, images, animations and rotation state. They do not run Windows native playback or Skia rendering. Startup matches a complete profile by actual class fingerprints, rather than Windows 10/11 or channel labels alone. Unknown interfaces prevent activation with a detailed error. Rotation stops and logs a warning if its playback-state checks fail.
 
@@ -188,7 +192,7 @@ If using PowerShell, configure the same environment variables and run this in th
 After the build reports `BUILD SUCCESSFUL`, look in the source directory's `dist` folder for:
 
 ```text
-SPW_Digital_Disc_v1.2.1.spmod
+SPW_Digital_Disc_v1.3.0.spmod
 ```
 
 This is the installation package that SPW can import. You do not need to ZIP the entire source directory or rename its extension. The `build` directory contains intermediate build output, not the installation package.
@@ -203,7 +207,7 @@ Set `JAVA_HOME`, add the JDK and Gradle `bin` directories to `PATH`, and make su
 bash build.sh "/path/to/SPW/app/ffmpeg-x64.dll"
 ```
 
-You still need the matching SPW Windows host file. Output is also placed in `dist/`. Building on Linux does not mean the plugin runs in a Linux player; this project targets SPW for Windows.
+You still need the matching SPW Windows host file. Output is also placed in `dist/`. The build platform and host compatibility are separate: runtime compatibility still depends on matching host interfaces. See the verified versions above.
 
 ### Common build problems
 
@@ -215,6 +219,8 @@ You still need the matching SPW Windows host file. Output is also placed in `dis
 | Host file is missing or cannot be read as a ZIP | Check that the file is the matching SPW installation's `app\ffmpeg-x64.dll`, not a different file with the same name |
 | `fingerprint mismatch`, missing host classes, or interface-related compilation errors | The host may not match the supported version; use the matching version instead of bypassing the checks |
 | The build failed, but an older file is still in `dist` | An existing file does not mean this build succeeded; check the current Gradle result |
+
+The pre-build check verifies SHA-256 fingerprints for the host archive and key classes, then resolves the cover entry and target by signature and verifies the unique static call site.
 
 ## Third-party components and license
 

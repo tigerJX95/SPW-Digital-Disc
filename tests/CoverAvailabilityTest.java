@@ -20,7 +20,12 @@ public class CoverAvailabilityTest {
   var refreshed=s.begin("A","A",t);s.complete(refreshed,"A",true);
   check(s.missing("A"),"bootstrap can publish missing");
   s.reset();s.complete(refreshed,"A",true);check(!s.missing("A"),"stop rejects late task");
-  new HostCoverStatus(s,()->null); // Verify actual host fingerprints and all reflective bindings.
+  var status=new HostCoverStatus(s,()->null);
+  var pathField=HostCoverStatus.class.getDeclaredField("path");
+  pathField.setAccessible(true);
+  var path=(java.lang.reflect.Method)pathField.get(status);
+  var item=new com.xuncorp.pisces.PiscesMediaItem("id","title","artist","album","album artist","music/test.flac");
+  check("music/test.flac".equals(path.invoke(item)),"artwork binding reads the path, not other media text");
   System.out.println("PASS host cover status bindings, no timeout inference, late results, ABA switch and one-shot bootstrap");
  }
 }

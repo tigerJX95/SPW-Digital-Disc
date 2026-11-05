@@ -26,6 +26,13 @@
           "title": "播放时旋转碟片",
           "summary": "默认关闭。出碟完成后约 20 秒转一圈；暂停或收起展示页时停在当前角度，恢复后继续。",
           "default_value": false
+        },
+        {
+          "type": "switch",
+          "key": "disc_vinyl",
+          "title": "默认盘面使用黑胶唱片",
+          "summary": "仅在没有可用的自定义盘面时生效。关闭时使用专辑封面 CD。",
+          "default_value": false
         }
       ]
     }
