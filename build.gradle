@@ -2,7 +2,7 @@
 // Host dependencies are compileOnly and are never bundled in the plugin.
 plugins { id 'java' }
 group = 'io.github.tigerjx95.spwcd'
-version = '1.3.0'
+version = '1.4.0'
 def host = providers.gradleProperty('saltPlayerArchive')
 java { sourceCompatibility = JavaVersion.VERSION_21; targetCompatibility = JavaVersion.VERSION_21 }
 sourceSets.main.java.srcDirs = ['src']

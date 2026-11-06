@@ -20,6 +20,17 @@ public class ReflectionTest {
   check(r.bitmap.getRGB(620,450)==0,"outside disc silhouette is transparent");
   check(r.saved.isEmpty()&&r.graphics.getClip()==null&&r.graphics.getTransform().isIdentity(),"all layers and transforms restored");
   Path out=Path.of(args[0]);Files.createDirectories(out.getParent());ImageIO.write(r.bitmap,"png",out.toFile());
+  // A reused renderer must follow cover size, reflection height and gap changes.
+  for(float[] geometry:new float[][]{{420,64,4},{420,64,4},{360,64,4},{360,90,4},{360,90,12},{420,64,4}}){
+   var reused=new RootRasterTest.Raster(630,488);
+   var fresh=new RootRasterTest.Raster(630,488);
+   reflection.draw(reused.scope,geometry[0],630,geometry[1],geometry[2],
+    ()->RootRenderer.paint(reused.scope,1,reused::source,(s,x,y,d)->false,reused::path));
+   new ReflectionRenderer(()->paint).draw(fresh.scope,geometry[0],630,geometry[1],geometry[2],
+    ()->RootRenderer.paint(fresh.scope,1,fresh::source,(s,x,y,d)->false,fresh::path));
+   check(java.util.Arrays.equals(reused.bitmap.getRGB(0,0,630,488,null,0,630),
+     fresh.bitmap.getRGB(0,0,630,488,null,0,630)),"reused gradient matches fresh rendering after geometry changes");
+  }
   System.out.println("PASS production ReflectionRenderer + RootRenderer: mirrored cover and CD silhouette, 18% layer, vertical fade, transparent gap/outside, fully restored Canvas");
   System.out.println("Actual host gradient Brush used with Java2D Canvas/Paint adapter; Windows compositing awaits real-machine validation.");
  }

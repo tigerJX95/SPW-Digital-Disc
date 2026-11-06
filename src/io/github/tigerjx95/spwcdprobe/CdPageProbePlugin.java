@@ -28,6 +28,8 @@ public final class CdPageProbePlugin extends SpwPlugin {
  private final MutableState<Boolean> enabled=state(false);
  private final ThreadLocal<Boolean> rawSource=ThreadLocal.withInitial(()->false);
  private final Path log;
+ private final Object logLock=new Object();
+ private static final long LOG_MAX_BYTES=256L*1024;
  private volatile boolean running;
  private javax.swing.Timer sourceObserver,animationClock;
  private final MutableState<Long> sourceRevision=state(0L);
@@ -107,7 +109,10 @@ public final class CdPageProbePlugin extends SpwPlugin {
   Object paintSource(){
    if(!presentationVisible())return null;
    String song;try{song=currentSong();}catch(Exception unavailable){return null;}
-   if(!Objects.equals(song,observedSong))observe(song);
+   if(!Objects.equals(song,observedSong)){
+    observe(song);
+    return resolvePresentation(observedSource);
+   }
    return resolvePresentation(source());
   }
   Object resolvePresentation(Object live){
@@ -127,8 +132,8 @@ public final class CdPageProbePlugin extends SpwPlugin {
     DiscImage previous=ownedCover;ownedCover=copy;ownedSource=live;
     if(previous!=null)previous.close();
     if(pendingCover!=null)pendingCover.close();pendingCover=null;
-    report("COVER_OWNED song="+observedSong+" source="+System.identityHashCode(live));
-   }catch(Exception|LinkageError error){lastCaptureFailure=live;report("COVER_CAPTURE_ERROR "+error+" cause="+error.getCause());}
+    report("COVER_OWNED source="+System.identityHashCode(live));
+   }catch(Exception|LinkageError error){lastCaptureFailure=live;report("COVER_CAPTURE_ERROR "+error.getClass().getSimpleName());}
    // The host may dispose every outgoing image node when its own transition
    // finishes. Our already displayed pixels belong to this song, not that node.
    // DiscImage is deliberately NOT a host painter: imageReady() stays false
@@ -136,7 +141,7 @@ public final class CdPageProbePlugin extends SpwPlugin {
    return ownedCover!=null?ownedSource:pendingCover!=null?pendingCover:live;
   }
   boolean presentationVisible(){
-   return secondary&&renderAllowed&&Boolean.TRUE.equals(enabled.getValue())&&sheet!=null&&sheet.Ԩ()&&sheet.ԩ();
+   return secondary&&renderAllowed&&Boolean.TRUE.equals(enabled.getValue())&&sheet!=null&&SheetStateBinding.current().visible(sheet);
   }
   void refreshReady(){
    // A reused Canvas need not receive another position callback after collapse,
@@ -152,7 +157,7 @@ public final class CdPageProbePlugin extends SpwPlugin {
   boolean suppress(){
    discRevision.getValue(); // Resolve completion must redraw even while Canvas is waiting.
    sourceRevision.getValue(); // Native subtree/cached image completion is not always a parent recomposition.
-   return secondary&&Boolean.TRUE.equals(enabled.getValue())&&Boolean.TRUE.equals(ready.getValue())&&!failed&&renderAllowed&&sheet!=null&&sheet.Ԩ()&&sheet.ԩ()&&(fallbackActive||visualCover()!=null||HostCoverBridge.imageReady(source()))&&(pendingCover!=null||Boolean.TRUE.equals(trackPending.getValue())||discResolved());
+   return presentationVisible()&&Boolean.TRUE.equals(ready.getValue())&&!failed&&(fallbackActive||visualCover()!=null||HostCoverBridge.imageReady(source()))&&(pendingCover!=null||Boolean.TRUE.equals(trackPending.getValue())||discResolved());
   }
   void restoreNative(){
    clearCover();rotation.reset();rotationAngle.setValue(0f);
@@ -226,7 +231,7 @@ public final class CdPageProbePlugin extends SpwPlugin {
    if(changed||current!=observedSource||available!=observedReady||missing!=observedMissing){
     observedMissing=missing;
     observedSource=current;observedReady=available;
-    report("SOURCE_STATE song="+song+" painter="+(current==null?"none":current.getClass().getName())+" decoded="+available+" failed="+failed);
+    report("SOURCE_STATE painter="+(current==null?"none":current.getClass().getName())+" decoded="+available+" failed="+failed);
     HostCoverBridge.invalidate(nativeRoot);return true;
    }
    return false;
@@ -241,7 +246,7 @@ public final class CdPageProbePlugin extends SpwPlugin {
   if(running)return;
   report("HOST_DETECTED version="+getPluginContext().getSpwVersion()+" channel="+getPluginContext().getSpwChannel()+" os="+System.getProperty("os.name")+" java="+System.getProperty("java.version"));
   try{host=new HostBindings(HostCompatibility.verify(getPluginContext(),getClass().getClassLoader()),getClass().getClassLoader());report("HOST_PROFILE "+host.profile.version());}
-  catch(IllegalStateException incompatible){report("HOST_REJECTED "+incompatible.getMessage());throw incompatible;}
+  catch(IllegalStateException incompatible){report("HOST_REJECTED "+incompatible.getClass().getSimpleName());throw incompatible;}
   if(!WorkshopApi.manager().isPermissionGranted(PluginPermission.CLASS_TRANSFORM)||!WorkshopApi.manager().isPermissionGranted(PluginPermission.LIBRARY_READ))throw new IllegalStateException("Grant class-transform and library-read permissions");
   try{
    var painterDraw=PainterDrawBinding.METHOD;
@@ -272,7 +277,7 @@ public final class CdPageProbePlugin extends SpwPlugin {
    // layout nodes must not be traversed by the local-image decode worker.
    sourceObserver=new javax.swing.Timer(100,event->observeSources());sourceObserver.start();
    animationClock=new javax.swing.Timer(16,event->animateFrames());animationClock.setCoalesce(true);animationClock.start();
-   report("START 1.3.0 Host Binding; retained pixels are not readiness; hooks="+handles.size());
+   report("START 1.4.0 Host Binding; retained pixels are not readiness; hooks="+handles.size());
   }catch(Throwable e){stop();throw new IllegalStateException("SelfDraw startup failed",e);}
  }
  @SuppressWarnings("unchecked")
@@ -315,7 +320,7 @@ public final class CdPageProbePlugin extends SpwPlugin {
   if(!active||!plan.usable(density.getDensity()))frame.ready.setValue(false);
   Modifier box=SizeKt.fillMaxSize((Modifier)args.get(4),1f);
   box=OnGloballyPositionedModifierKt.onGloballyPositioned(box,c->{
-   try{long size=size(c);frame.viewport.setValue(new Viewport((int)(size>>>32),(int)size));}catch(Exception e){report("VIEWPORT_ERROR "+e);}
+   try{long size=size(c);frame.viewport.setValue(new Viewport((int)(size>>>32),(int)size));}catch(Exception e){report("VIEWPORT_ERROR "+e.getClass().getSimpleName());}
    return Unit.INSTANCE;
   });
   box=DrawModifierKt.drawWithContent(box,scope->{
@@ -376,7 +381,7 @@ public final class CdPageProbePlugin extends SpwPlugin {
         if(!Objects.equals(drawSong,song))return true;
         // true also means pending: draw cover only, never a temporary silver CD.
         try{return service==null||service.drawResolved(song,image->image.draw(target,cx,cy,diameter));}
-        catch(Exception error){if(service!=null)service.discard(song);report("LOCAL_CD_DRAW_ERROR "+error+"; cause="+error.getCause());return true;}
+        catch(Exception error){if(service!=null)service.discard(song);report("LOCAL_CD_DRAW_ERROR "+error.getClass().getSimpleName());return true;}
        };
        var canvas=scope.getDrawContext().getCanvas();canvas.save();
        try{
@@ -397,14 +402,14 @@ public final class CdPageProbePlugin extends SpwPlugin {
           if(cover!=null)RootRenderer.paint(scope,cover.aspect(),cover::drawCover,disc,androidx.compose.ui.graphics.SkiaBackedPath_skikoKt::Path,exposed,amount,front,frame.frontDiscLayer,angle,display.vinyl());
           else RootRenderer.draw(scope,painter,()->rawSource.set(true),()->rawSource.remove(),disc,exposed,amount,front,frame.frontDiscLayer,angle,frame.fallbackActive,display.vinyl());
          });}
-         catch(Exception error){report("REFLECTION_ERROR "+error+"; cause="+error.getCause());}
+         catch(Exception error){report("REFLECTION_ERROR "+error.getClass().getSimpleName());}
         }
        }finally{canvas.restore();}
        if(frame.lastPainted!=painter){frame.lastPainted=painter;report("SELF_DRAW source="+painter.getClass().getName()+" widgetPx="+plan.width()+"x"+plan.height()+" coverSidePx="+plan.side()+" secondary="+plan.secondary());}
-      }catch(Throwable error){frame.clearCover();frame.passPainter.setValue(null);frame.rejectedSource.setValue(painter);HostCoverBridge.invalidate(frame.nativeRoot);report("SELF_DRAW_SOURCE_ERROR native fallback until a fresh source: "+error+"; cause="+error.getCause());}
+      }catch(Throwable error){frame.clearCover();frame.passPainter.setValue(null);frame.rejectedSource.setValue(painter);HostCoverBridge.invalidate(frame.nativeRoot);report("SELF_DRAW_SOURCE_ERROR native fallback until a fresh source: "+error.getClass().getSimpleName());}
       return Unit.INSTANCE;
      },c,0);
-    }catch(Exception error){frame.failed=true;frame.ready.setValue(false);report("WIDGET_ERROR "+error);}
+    }catch(Exception error){frame.failed=true;frame.ready.setValue(false);report("WIDGET_ERROR "+error.getClass().getSimpleName());}
    }
    c.endReplaceGroup();return Unit.INSTANCE;
   },composer,0,0);
@@ -432,8 +437,8 @@ public final class CdPageProbePlugin extends SpwPlugin {
      if(coverStatus!=null&&frame.observedSource==null&&frame.ownedCover==null&&coverAvailability.refreshNeeded(song,System.nanoTime()))coverStatus.refreshCurrent();
     }
    }}
-   if(changed){sourceRevision.setValue(sourceRevision.getValue()+1);report("SOURCE_REFRESH song="+song);}
-  }catch(Exception error){report("SOURCE_OBSERVER_ERROR "+error);}
+   if(changed){sourceRevision.setValue(sourceRevision.getValue()+1);report("SOURCE_REFRESH");}
+  }catch(Exception error){report("SOURCE_OBSERVER_ERROR "+error.getClass().getSimpleName());}
  }
  private void animateFrames(){
   if(!running)return;
@@ -443,7 +448,7 @@ public final class CdPageProbePlugin extends SpwPlugin {
   boolean sourceChanged=false;
   var display=displaySettings.getValue();
   boolean rotate=display.rotate();
-  boolean playing=rotate&&playbackState.playing(this::report);
+  Boolean playing=null;
   synchronized(frames){for(var it=frames.iterator();it.hasNext();){
    Frame frame=it.next().get();if(frame==null){it.remove();continue;}
    // Expanded target alone is insufficient: animation must not run while the
@@ -452,26 +457,29 @@ public final class CdPageProbePlugin extends SpwPlugin {
    // native-node detach during AnimatedContent is not a sheet close/reopen.
    boolean visible=frame.presentationVisible();
    frame.syncVisibility(visible);
-   if(!visible){frame.rotationAngle.setValue(frame.rotation.sample(song,rotate,playing,false,now));continue;}
+   if(!visible){frame.rotationAngle.setValue(frame.rotation.sample(song,rotate,false,false,now));continue;}
    frame.refreshReady();
-   if(frame.nativeRoot==null||!frame.nativeRoot.isAttached()){frame.rotationAngle.setValue(frame.rotation.sample(song,rotate,playing,false,now));continue;}
+   if(frame.nativeRoot==null||!frame.nativeRoot.isAttached()){frame.rotationAngle.setValue(frame.rotation.sample(song,rotate,false,false,now));continue;}
    try{
     if(frame.motion.phase()==DiscTransition.Phase.IDLE){frame.motion.enter();frame.pose.setValue(frame.motion.pose());}
     sourceChanged|=frame.observe(song);
     boolean switched=frame.trackGate.observe(song,now);
     if(switched&&!frame.motion.closing()&&!frame.motion.finished()){
      frame.motion.trackChanged();frame.trackPending.setValue(true);frame.pose.setValue(frame.motion.pose());
-     report("TRACK_ENTRY_PENDING song="+song);
+     report("TRACK_ENTRY_PENDING");
     }
     Object source=frame.passPainter.getValue();
     if(frame.motion.phase()==DiscTransition.Phase.TRACK_WAIT){
      if(frame.trackGate.ready(song,source,frame.fallbackActive||frame.ownedCover!=null||HostCoverBridge.imageReady(source),discResolved(song),now)){
-      frame.motion.trackReady(now);frame.trackPending.setValue(false);report("TRACK_ENTRY_START song="+song);
+      frame.motion.trackReady(now);frame.trackPending.setValue(false);report("TRACK_ENTRY_START");
      }
     }else if(source!=null&&Boolean.TRUE.equals(frame.ready.getValue()))frame.motion.ready(now);
     frame.advanceMotion(now);
-    frame.rotationAngle.setValue(frame.rotation.sample(song,rotate,playing,frame.motion.phase()==DiscTransition.Phase.OPEN&&(frame.fallbackActive||frame.ownedCover!=null)&&display.amount()>0&&discResolved(song),now));
-   }catch(Exception error){frame.rotation.sample(song,rotate,false,false,now);frame.motion.reset();frame.pose.setValue(frame.motion.pose());report("ANIMATION_ERROR "+error);}
+    boolean canRotate=rotate&&song!=null&&frame.motion.phase()==DiscTransition.Phase.OPEN
+      &&(frame.fallbackActive||frame.ownedCover!=null)&&display.amount()>0&&discResolved(song);
+    if(canRotate&&playing==null)playing=playbackState.playing(this::report);
+    frame.rotationAngle.setValue(frame.rotation.sample(song,rotate,canRotate&&playing,canRotate,now));
+   }catch(Exception error){frame.rotation.sample(song,rotate,false,false,now);frame.motion.reset();frame.pose.setValue(frame.motion.pose());report("ANIMATION_ERROR "+error.getClass().getSimpleName());}
   }}
   // The faster animation clock may see a new source before sourceObserver.
   // Publish that observation too, so a suppressed cached native layer cannot
@@ -486,15 +494,30 @@ public final class CdPageProbePlugin extends SpwPlugin {
  @Override public synchronized void stop(){
   enabled.setValue(false);running=false;coverAvailability.reset();coverStatus=null;
   if(animationClock!=null){animationClock.stop();animationClock=null;}
-  if(discSettings!=null){try{discSettings.close();}catch(Exception error){report("SETTINGS_CLOSE_WARNING "+error);}discSettings=null;}
+  if(discSettings!=null){try{discSettings.close();}catch(Exception error){report("SETTINGS_CLOSE_WARNING "+error.getClass().getSimpleName());}discSettings=null;}
   synchronized(frames){for(var ref:frames){Frame frame=ref.get();if(frame!=null)frame.restoreNative();}}
   if(sourceObserver!=null){sourceObserver.stop();sourceObserver=null;}
   if(localDiscs!=null){localDiscs.close();localDiscs=null;}
-  for(int i=handles.size()-1;i>=0;i--)try{handles.get(i).close();}catch(Throwable e){report("UNHOOK_WARNING "+e);}
+  for(int i=handles.size()-1;i>=0;i--)try{handles.get(i).close();}catch(Throwable e){report("UNHOOK_WARNING "+e.getClass().getSimpleName());}
   handles.clear();rawSource.remove();report("STOP SelfDraw disabled; native fallback");
  }
  @Override public void update(){stop();}@Override public void delete(){stop();}
- private synchronized void report(String s){
-  try{Files.createDirectories(log.toAbsolutePath().getParent());Files.writeString(log,Instant.now()+" "+s+System.lineSeparator(),StandardOpenOption.CREATE,StandardOpenOption.APPEND);}catch(Exception e){System.err.println(s);}
+ private void report(String message){
+  StringBuilder safe=new StringBuilder();
+  message.codePoints().limit(512).forEach(cp->safe.appendCodePoint(
+   Character.isISOControl(cp)||Character.getType(cp)==Character.FORMAT||cp==0x2028||cp==0x2029?' ':cp));
+  byte[] line=(Instant.now()+" "+safe+System.lineSeparator()).getBytes(java.nio.charset.StandardCharsets.UTF_8);
+  synchronized(logLock){
+   try{
+    Files.createDirectories(log.toAbsolutePath().getParent());
+    try(var channel=Files.newByteChannel(log,StandardOpenOption.CREATE,StandardOpenOption.WRITE,LinkOption.NOFOLLOW_LINKS)){
+     long size=channel.size();
+     if(size+line.length>LOG_MAX_BYTES){channel.truncate(0);size=0;}
+     channel.position(size);
+     var buffer=java.nio.ByteBuffer.wrap(line);
+     while(buffer.hasRemaining())channel.write(buffer);
+    }
+   }catch(Exception ignored){System.err.println(safe);}
+  }
  }
 }

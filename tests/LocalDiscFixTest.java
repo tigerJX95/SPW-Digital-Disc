@@ -32,8 +32,36 @@ public class LocalDiscFixTest {
   current.set(song.toString());expect(service,current.get(),colors[3]);
   Files.write(folder.resolve("disc.jpg"),new byte[]{1});LocalDiscServiceTest.fresh(service);
   check(LocalDiscServiceTest.get(service,current.get())==null,"all invalid fallback");
-  check(log.stream().anyMatch(x->x.contains("LOCAL_CD_REJECTED")&&x.contains("IOException:")),"diagnostic reason");
-  check(log.stream().anyMatch(x->x.contains("directory="+folder)),"diagnostic lookup directory");
+  check(log.stream().anyMatch(x->x.contains("LOCAL_CD_REJECTED")&&x.contains("IOException")),"diagnostic reason");
+  check(log.stream().anyMatch(x->x.startsWith("LOCAL_CD_DEFAULT no usable")),"diagnostic fallback");
+  check(log.stream().noneMatch(x->x.contains(folder.toString())||x.contains(song.getFileName().toString())),"diagnostic omits album and song paths");
+  Path primary=folder.resolve("cd.png");
+  Path fallback=folder.resolve("cd.jpg");
+  Path outside=Files.createTempFile("spw-outside-album-",".png");
+  Path linkedSong=folder.resolve("linked.flac");
+  try{
+   Files.write(primary,image("png",colors[0]));
+   Files.write(fallback,image("jpg",colors[1]));
+   Files.write(outside,image("png",colors[2]));
+   expect(service,current.get(),colors[0]);
+   var cached=LocalDiscServiceTest.get(service,current.get());
+   Files.delete(primary);
+   Files.createSymbolicLink(primary,outside);
+   expect(service,current.get(),colors[1]);
+   check(cached.closed==1,"linked replacement invalidates cached disc");
+   Files.delete(fallback);
+   LocalDiscServiceTest.fresh(service);
+   check(service.isResolved(current.get())&&LocalDiscServiceTest.get(service,current.get())==null,
+       "outside artwork link is skipped even without a fallback");
+   Files.createSymbolicLink(linkedSong,song);
+   check(LocalDiscService.directory(linkedSong.toString())==null,"audio file link does not open a second directory");
+   System.out.println("PASS same-directory restriction, outside link rejected, cache eviction and fallback");
+  }finally{
+   Files.deleteIfExists(linkedSong);
+   Files.deleteIfExists(primary);
+   Files.deleteIfExists(fallback);
+   Files.deleteIfExists(outside);
+  }
   service.close();System.out.println("PASS PNG/JPEG four-file priority, corrupt fallback, real JPEG decode, raw host URL with spaces/percent/Unicode/#/?, encoded URL, normal path, diagnostic details");
   System.out.println("Windows SPW native rendering still requires real-machine validation.");
  }

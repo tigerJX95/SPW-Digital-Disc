@@ -3,24 +3,26 @@ package io.github.tigerjx95.spwcdprobe;
 import java.awt.*;
 import java.awt.geom.Ellipse2D;
 import java.awt.image.BufferedImage;
+import java.awt.image.DataBuffer;
 import java.awt.image.DataBufferInt;
 import java.io.*;
 import javax.imageio.ImageIO;
+import javax.imageio.stream.ImageInputStreamImpl;
 
 /** Worker-only normalization. Premultiplied alpha avoids dark transparent fringes. */
 final class DiscArtwork {
  static final int MAX_SIDE=2048;
  private DiscArtwork(){}
  static BufferedImage prepare(byte[] bytes,int width,int height)throws IOException{
-  BufferedImage source=ImageIO.read(new ByteArrayInputStream(bytes));
-  if(source==null||source.getWidth()!=width||source.getHeight()!=height)throw new IOException("image dimensions changed");
+  BufferedImage source=readForDisplay(bytes,width,height);
+  int decodedWidth=source.getWidth(),decodedHeight=source.getHeight();
   // Preserve transparent cutouts in full. Opaque scans use a centered square crop,
   // so a rectangular photo fills a circular disc without stretching it.
   boolean transparent=false;
   if(source.getColorModel().hasAlpha()){
-   int[] row=new int[width];
-   outer:for(int y=0;y<height;y++){
-    source.getRGB(0,y,width,1,row,0,width);
+   int[] row=new int[decodedWidth];
+   outer:for(int y=0;y<decodedHeight;y++){
+    source.getRGB(0,y,decodedWidth,1,row,0,decodedWidth);
     for(int pixel:row)if((pixel>>>24)!=255){transparent=true;break outer;}
    }
   }
@@ -36,8 +38,9 @@ final class DiscArtwork {
     int w=Math.max(1,(int)Math.round((double)width*side/extent)),h=Math.max(1,(int)Math.round((double)height*side/extent));
     g.drawImage(source,(side-w)/2,(side-h)/2,w,h,null);
    }else{
-    int x=(width-extent)/2,y=(height-extent)/2;
-    g.drawImage(source,0,0,side,side,x,y,x+extent,y+extent,null);
+    int crop=Math.min(decodedWidth,decodedHeight);
+    int x=(decodedWidth-crop)/2,y=(decodedHeight-crop)/2;
+    g.drawImage(source,0,0,side,side,x,y,x+crop,y+crop,null);
    }
    // DstIn multiplies, rather than replaces, the original PNG alpha. No backing
    // color or artificial center hub is placed under custom artwork.
@@ -49,6 +52,52 @@ final class DiscArtwork {
    }finally{mask.flush();}
   }finally{g.dispose();source.flush();}
   return result;
+ }
+ // Budget the reader's actual destination raster before it is allocated.
+ private static BufferedImage readForDisplay(byte[] bytes,int width,int height)throws IOException{
+  try(var stream=new ArtworkInput(bytes)){
+   var readers=ImageIO.getImageReaders(stream);
+   if(!readers.hasNext())throw new IOException("unsupported PNG/JPEG");
+   var reader=readers.next();
+   try{
+    reader.setInput(stream,true,true);
+    if(reader.getWidth(0)!=width||reader.getHeight(0)!=height)throw new IOException("image dimensions changed");
+    var types=reader.getImageTypes(0);
+    if(!types.hasNext())throw new IOException("no image destination type");
+    var type=types.next();
+    var sample=type.getSampleModel();
+    int bytesPerPixel=sample.getNumDataElements()*DataBuffer.getDataTypeSize(sample.getDataType())/8;
+    long budget=Math.min(64L*1024*1024,Runtime.getRuntime().maxMemory()/4);
+    int step=1;
+    while((long)Math.ceilDiv(width,step)*Math.ceilDiv(height,step)*bytesPerPixel>budget)step++;
+    var params=reader.getDefaultReadParam();
+    params.setDestinationType(type);
+    params.setSourceSubsampling(step,step,0,0);
+    return reader.read(0,params);
+   }finally{reader.dispose();}
+  }
+ }
+ // ImageIO can seek through the bounded byte array without retaining a second encoded copy.
+ private static final class ArtworkInput extends ImageInputStreamImpl {
+  private final byte[] bytes;
+  ArtworkInput(byte[] bytes){this.bytes=bytes;}
+  @Override public int read()throws IOException{
+   checkClosed();
+   bitOffset=0;
+   return streamPos<bytes.length?Byte.toUnsignedInt(bytes[(int)streamPos++]):-1;
+  }
+  @Override public int read(byte[] target,int offset,int length)throws IOException{
+   checkClosed();
+   java.util.Objects.checkFromIndexSize(offset,length,target.length);
+   bitOffset=0;
+   if(length==0)return 0;
+   if(streamPos>=bytes.length)return -1;
+   int count=Math.min(length,bytes.length-(int)streamPos);
+   System.arraycopy(bytes,(int)streamPos,target,offset,count);
+   streamPos+=count;
+   return count;
+  }
+  @Override public long length(){return bytes.length;}
  }
  // Explicit BGRA byte order, independent of CPU endianness. prepare() owns a
  // contiguous INT_ARGB_PRE raster; copying raw channels preserves premultiplication

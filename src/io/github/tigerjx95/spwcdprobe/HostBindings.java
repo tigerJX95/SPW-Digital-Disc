@@ -14,9 +14,9 @@ final class HostBindings {
  HostBindings(HostCompatibility.Profile profile,ClassLoader loader){
   this.profile=profile;
   try{
-   var targets=HostClassDiscovery.current();
+   var targets=HostClassDiscovery.current(loader);
    if(!targets.owner().equals(profile.owner()) || !targets.caller().equals(profile.caller())
-     || !targets.local().equals(profile.local())) {
+     || !targets.local().equals(profile.local()) || !targets.painter().equals(profile.painter())) {
     throw new IllegalStateException("Discovered classes do not match verified host " + profile.version());
    }
    caller=targets.caller();
@@ -24,6 +24,7 @@ final class HostBindings {
     Function0.class,boolean.class,boolean.class,boolean.class,Modifier.class,Composer.class,int.class,int.class);
    local=uniqueStatic(Class.forName(targets.local(),false,loader),ProvidableCompositionLocal.class);
    HostClassDiscovery.verifyCall(loader,caller,cover);
+   SheetStateBinding.current();
   }catch(ReflectiveOperationException | java.io.IOException e){
    throw new IllegalStateException("Host "+profile.version()+" method binding failed",e);
   }

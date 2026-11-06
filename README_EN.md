@@ -4,11 +4,13 @@
 
 Adds a digital CD presentation to Salt Player for Windows (SPW), with a complete album cover and a CD extending from its right side.
 
-Current version: **v1.3.0**. Includes interface mappings for **SPW 1.19.0 and 1.19.3 Microsoft Store**; see the compatibility table below for validation status.
+Current version: **v1.4.0**. V1.4 focuses on host-interface compatibility and rendering overhead, with verification profiles for **SPW 1.19.0 and 1.19.3 Microsoft Store**.
 
-Enable the vinyl default artwork setting to show dark record grooves and a circular album label when no custom disc artwork is available. This setting is off by default.
+- **Discover cover interfaces dynamically**: locate the cover entry, caller and sheet-state accessor using Kotlin metadata, method signatures and a unique call relationship, allowing these classes to be renamed by obfuscation.
+- **Identify the cover painter dynamically**: use inheritance and field types, allowing the painter's own class and private fields to be renamed. A normalized implementation fingerprint still rejects unknown implementations or ambiguous candidates.
+- **Reduce repeated queries and allocations**: cache sheet-visibility methods, share one playback-state query per animation tick, skip that query when hidden or rotation is unnecessary, reuse reflection gradients and avoid rescanning the cover tree immediately after observing a track change.
 
-V1.3 improves local disc image processing with direct premultiplied pixel transfer instead of intermediate PNG encoding and a second decode, plus faster transparency scanning and a bounded cross-album custom-artwork cache. The V1.2.1 uniform silver-gray blank disc and hub are retained. Fixed occasional blank cover frames and flashes of the previous disc during rapid track changes. Improved the transition from the enlarged cover back to the smaller cover on the left after the disc retracts.
+Sheet-state, playback and artwork-loading checks remain in place.
 
 [Update history](CHANGELOG.md) (Chinese)
 
@@ -26,16 +28,16 @@ I wanted to bring this digital record experience to Salt Player: enjoying the co
 
 - **Primary detail page**: keeps SPW's native album cover, lyrics, and playback controls.
 - **Secondary display page**: clicking the album cover opens a larger, centered presentation of the complete cover and a CD on its right. The cover is not squeezed into half an image.
-- **Local disc artwork**: searches the current song's directory in the order `cd.png → cd.jpg → disc.png → disc.jpg`. If a higher-priority file cannot be decoded, the next file is tried.
-- **Generated disc artwork**: when local artwork is unavailable, a copy of the album cover fills a circular CD with a narrow white edge, translucent annular hub, translucent center hole and tiny white spindle. Two narrow silver bevels use adjacent highlights and grooves around a translucent hub field, preserving the artwork underneath; the main cover remains complete.
-- **Transparent images**: local PNG files retain their existing transparent backgrounds and center holes. An antialiased circular outer mask is applied. No extra center hole or hub ring is added.
+- **Custom disc artwork**: searches the current song's directory in the order `cd.png → cd.jpg → disc.png → disc.jpg`. If a higher-priority file cannot be decoded, the next file is tried.
+- **Generated disc artwork**: when custom artwork is unavailable, a copy of the album cover fills a circular CD with a narrow white edge, translucent annular hub, translucent center hole and tiny white spindle. Two narrow silver bevels use adjacent highlights and grooves around a translucent hub field, preserving the artwork underneath; the main cover remains complete.
+- **Transparent images**: custom PNG files retain their existing transparent backgrounds and center holes. An antialiased circular outer mask is applied. No extra center hole or hub ring is added.
 - **Front-disc display**: enable the native plugin switch to draw the disc over the cover. Off by default. Front mode uses whole-disc motion with a short uniform fade. Compare at exposure 50; in front mode exposure controls horizontal travel, while 0 still shows only the cover.
 - **Disc exposure setting**: open SPW Digital Disc settings in the plugin manager and adjust 0–100. Default 50 preserves the existing view; 100 shows the full disc. The host saves the value. The group fits the window, and cover-only mode returns without a retract delay.
 - **Cross-album disc cache**: keeps up to 4 custom images under a combined 32 MiB normalized-pixel budget, including the active image. Least recently used entries are evicted. Candidate priority, file size, modification time and available file identity are checked before reuse; changed or deleted files are invalidated. Disabling the plugin or clearing current media releases the cache. Generated cover discs continue to use the host’s valid cover result.
 - **Playback-linked rotation**: enable “Rotate while playing” to start gently over about 240 ms after ejection, then rotate once every 20 seconds. Pause and retraction freeze the angle; resume starts gently from that angle. Off by default; the cover stays still.
 - **Page animations**: the cover enlarges first, then the CD gradually slides out from behind it. Clicking the combined display to return retracts the CD before invoking the native return action. The reflection follows the same animation progress. Normal track changes replay the eject animation without rescaling the cover; rapid changes eject only the last stably selected song's disc.
 - **Combined reflection**: the cover and CD have a short reflection that fades downward.
-- Local files are read only. The plugin does not modify songs or original disc images, or save generated disc artwork to disk.
+- Artwork on local disks and accessible network shares is read only. Generated artwork is kept in memory for display.
 
 ## Results Showcase
 
@@ -48,7 +50,7 @@ Current interface mappings cover **SPW 1.19.0 and 1.19.3 Microsoft Store**. The 
 1. Obtain the compiled `.spmod` file. The source ZIP cannot be installed directly; see the build instructions below to compile it yourself.
 2. In SPW's plugin manager, use the local plugin import option to select the `.spmod` file.
 3. Grant `class-transform` and `library-read` when prompted, enable the plugin, and restart SPW.
-4. Play a local song. Click the bottom playback bar to open the primary detail page, then click the album cover to open the secondary display page.
+4. Play a song from the local machine or an accessible network share. Click the bottom playback bar to open the primary detail page, then click the album cover to open the secondary display page.
 5. On the secondary page, click the combined cover/CD display to return. The CD retracts before the primary page returns. You can also return while the CD is sliding out; repeated clicks do not queue multiple return actions.
 
 Normal ejection takes about 700 ms and full retraction up to about 650 ms, with quintic easing at the endpoints. A final displacement below one physical pixel can complete early before invoking native return. Returning during ejection preserves the current pose and brakes for up to about 80 ms before retracting, without passing the original endpoint. Returning from a fully open disc adds no braking delay.
@@ -57,11 +59,12 @@ After a track change, the plugin waits for a selection-stability interval of abo
 
 Collapsing the entire playback detail page or disabling the plugin cancels unfinished animations and delayed return actions, preventing remnants from appearing over the mini player.
 
-The current installation package is `SPW_Digital_Disc_v1.3.0.spmod`. The source ZIP is for development and building; choose the `.spmod` file when installing.
+## Where to put custom disc images
 
-## Where to put local disc images
+> [!IMPORTANT]
+> **The audio and custom disc image must be regular files in the same folder.** The folder can be on a local drive, a mapped network drive, or an accessible UNC share. Artwork lookup skips symbolic links to either file.
 
-Place the disc image in **the same directory as the audio file**. For example, if the song is at `D:\Music\Album\01.flac`, put the disc image at `D:\Music\Album\cd.png`.
+For example, use `D:\Music\Album\cd.png` alongside `D:\Music\Album\01.flac`, or `\\NAS\Music\Album\cd.png` alongside `\\NAS\Music\Album\01.flac`.
 
 | Priority | Filename |
 | --- | --- |
@@ -70,13 +73,13 @@ Place the disc image in **the same directory as the audio file**. For example, i
 | 3 | `disc.png` |
 | 4 | `disc.jpg` |
 
-If all four files exist and are readable, `cd.png` is used. Use the lowercase filenames shown above. Songs in the same directory share that disc image. The plugin does not currently search parent directories or subdirectories, support custom disc image paths, or download disc artwork automatically.
+If all four files are readable, `cd.png` takes priority. Use the lowercase names above. Songs in one directory share the artwork. Lookups use the current Windows account’s access rights. HTTP and HTTPS streaming URLs are excluded from artwork lookup.
 
 For a transparent background or center hole, use a PNG with those transparent areas already prepared.
 
-The main supported and tested range is **1000 × 1000 to 4000 × 4000 pixels**, including 3000 × 3000 custom PNG artwork. Display copies are capped at **2048 × 2048 pixels**; smaller images are not upscaled and originals are unchanged. Generated discs use an independent host-cover snapshot. Custom artwork is normalized in the background and reused across same-directory track changes or returns to another album after file validation. The budget covers retained custom-artwork pixels only, excluding temporary decoding allocations, host covers and other player memory. Images over 32 MiB, 8192 pixels on either side, or 16 Mi pixels in total are rejected. Images above 4000 × 4000 pixels fall outside the main supported and tested range.
+The main supported and tested range is **1000 × 1000 to 4000 × 4000 pixels**, including 3000 × 3000 custom PNG artwork. Display copies are capped at **2048 × 2048 pixels**; smaller images are not upscaled and originals are unchanged. Generated discs use an independent host-cover snapshot. Custom artwork is normalized in the background and reused across same-directory track changes or returns to another album after file validation. The budget covers retained custom-artwork pixels only, excluding temporary decoding allocations, host covers and other player memory. High-memory artwork is subsampled during decoding based on its pixel format and the JVM heap limit. Images over 32 MiB, 8192 pixels on either side, or 16 Mi pixels in total are rejected. Images above 4000 × 4000 pixels fall outside the main supported and tested range.
 
-## Prepare local CD artwork (optional)
+## Prepare custom CD artwork (optional)
 
 > [!NOTE]
 > **Create disc artwork with the PSD template**
@@ -108,18 +111,20 @@ Only the disc rotates; the cover stays upright and the reflection shares the ang
 
 ## Verified SPW host versions
 
-| SPW host | Interface mapping | V1.3 offline regression |
+| SPW host | Interface mapping | V1.4 offline regression |
 | --- | --- | --- |
-| 1.19.0 Microsoft Store | Adapted | 46 programs pass |
-| 1.19.3 Microsoft Store | Adapted | 46 programs pass |
+| 1.19.0 Microsoft Store | Adapted | 48 programs pass |
+| 1.19.3 Microsoft Store | Adapted | 48 programs pass |
 
-Offline tests cover interface resolution, cover calls, configuration storage, images, animations and rotation state. They do not run Windows native playback or Skia rendering. Startup matches a complete profile by actual class fingerprints, rather than Windows 10/11 or channel labels alone. Unknown interfaces prevent activation with a detailed error. Rotation stops and logs a warning if its playback-state checks fail.
+Real-machine validation passed on Windows 10 with SPW 1.19.3 Microsoft Store.
+
+Offline tests cover interface resolution, cover calls, configuration storage, images, animations and rotation state. They do not run Windows native playback or Skia rendering. Startup verifies playback-controller and sheet-state fingerprints, then locates the cover entry, caller and sheet-state accessor using metadata, signatures and a unique call relationship. The cover painter must be the unique structural match and pass an implementation fingerprint normalized for its own obfuscated identifiers and debug metadata. Discovery results are cached per host class loader. Missing or ambiguous targets prevent activation with a detailed error. Startup also validates playback and artwork-loading interfaces and rejects incompatible hosts. If playback state cannot be read during operation, rotation stops and a warning is logged.
 
 Host updates that prevent loading take priority for compatibility fixes and may receive a patch release. A version-number change alone does not require a release when features still work. New adaptations retain verified older profiles where possible. Include the host version, channel, plugin version and full error when reporting a problem.
 
 ## Compatibility and limitations
 
-- Complete SPW 1.19.0 and 1.19.3 interface mappings are selected by critical class fingerprints. Unknown interfaces require review; checks are not bypassed.
+- SPW 1.19.0 and 1.19.3 rendering and state verification profiles are included. The three cover-entry classes and the cover painter are discovered dynamically. The painter retains a normalized implementation fingerprint; sheet-state, playback and artwork-loading classes retain their existing fingerprint checks.
 - Disc images are searched only in the audio file's directory using fixed filenames, without recursion, custom paths or automatic downloads.
 - JPG preparation masks the outer circle but does not detect the disc, remove backgrounds inside the circle or create a center hole.
 - If playback state cannot be read, rotation stops and logs `ROTATION_STATE_UNAVAILABLE`; artwork display retains its existing behavior.
@@ -127,7 +132,7 @@ Host updates that prevent loading take priority for compatibility fixes and may 
 
 ## Implementation
 
-The plugin is written in **Java** and uses the SPW plugin API, Compose drawing, and Skia image decoding. It connects through the identified `FullScreenCover` entry point and renders the complete cover and CD in an independent Canvas. Local images are read asynchronously, and the drawing handoff uses Compose observable state.
+The plugin is written in **Java** and uses the SPW plugin API, Compose drawing, and Skia image decoding. It connects through the identified `FullScreenCover` entry point and renders the complete cover and CD in an independent Canvas. Disc images are read asynchronously. Compose observable state coordinates the transition from the native cover to the custom display.
 
 ## Build an installation package from source
 
@@ -138,7 +143,7 @@ These steps generate a `.spmod` plugin. You do not need these development tools 
 | Component | Requirement and purpose |
 | --- | --- |
 | JDK | Use the project's existing JDK 25 setup, including both `java` and `javac` |
-| Gradle | Use Gradle 9.8; the source package does not include a Gradle Wrapper, so install Gradle separately |
+| Gradle | Install Gradle 9.8 |
 | Python | Python 3; on Windows, it must be available as the `python` command |
 | SPW host file | `app\ffmpeg-x64.dll` from the installation directory of the supported SPW 1.19.0 or 1.19.3 Microsoft Store version |
 
@@ -192,12 +197,12 @@ If using PowerShell, configure the same environment variables and run this in th
 After the build reports `BUILD SUCCESSFUL`, look in the source directory's `dist` folder for:
 
 ```text
-SPW_Digital_Disc_v1.3.0.spmod
+SPW_Digital_Disc_v1.4.0.spmod
 ```
 
 This is the installation package that SPW can import. You do not need to ZIP the entire source directory or rename its extension. The `build` directory contains intermediate build output, not the installation package.
 
-Import the `.spmod` through SPW's plugin manager, grant `class-transform` and `library-read`, enable it, and restart SPW. For page navigation and disc image placement, see “Installation and use” and “Where to put local disc images” above.
+Import the `.spmod` through SPW's plugin manager, grant `class-transform` and `library-read`, enable it, and restart SPW. For page navigation and disc image placement, see “Installation and use” and “Where to put custom disc images” above.
 
 ### Build on Linux
 

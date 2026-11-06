@@ -19,12 +19,18 @@ final class ReflectionRenderer {
  }
  private final Supplier<Paint> paints;
  private Paint layer;
+ private Brush fade;
+ private float fadeTop,fadeBottom;
  ReflectionRenderer(){this(SkiaBackedPaint_skikoKt::Paint);}
  ReflectionRenderer(Supplier<Paint> paints){this.paints=paints;}
  void draw(DrawScope scope,float side,float width,float height,float gap,Content content)throws Exception{
   if(side<=0||width<=0||height<=0)return;
   if(layer==null){layer=paints.get();layer.setAlpha(.18f);}
   float top=side+gap,bottom=top+height;
+  if(fade==null||top!=fadeTop||bottom!=fadeBottom){
+   fade=(Brush)GRADIENT.invoke(Brush.Companion,List.of(BOX_COLOR.invoke(null,ColorKt.Color(0xff000000)),BOX_COLOR.invoke(null,ColorKt.Color(0x00000000))),top,bottom,0);
+   fadeTop=top;fadeBottom=bottom;
+  }
   Canvas canvas=scope.getDrawContext().getCanvas();
   canvas.save();
   try{
@@ -33,7 +39,6 @@ final class ReflectionRenderer {
    try{
     canvas.save();
     try{canvas.translate(0,2*side+gap);canvas.scale(1,-1);content.draw();}finally{canvas.restore();}
-    Brush fade=(Brush)GRADIENT.invoke(Brush.Companion,List.of(BOX_COLOR.invoke(null,ColorKt.Color(0xff000000)),BOX_COLOR.invoke(null,ColorKt.Color(0x00000000))),top,bottom,0);
     RECT.invoke(scope,fade,RootRenderer.pack(0,top),RootRenderer.pack(width,height),1f,Fill.INSTANCE,null,6); // DstIn
    }finally{canvas.restore();}
   }finally{canvas.restore();}

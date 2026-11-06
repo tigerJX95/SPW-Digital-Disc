@@ -27,7 +27,7 @@ tests = [
     'ProductionResumeTest', 'ProductionLayoutRecoveryTest', 'ObservableHandoffTest', 'ProductionRotationHandoffTest',
     'HostEntryTest', 'HostImageDrawTest', 'RootRasterTest', 'VinylRendererTest', 'CoverDiscTest',
     'LocalDiscRasterTest', 'DiscMotionRasterTest', 'ReflectionTest', 'RevealOrderTest',
-    'RevealCycleTest', 'DiscExposureTest', 'DiscSettingsTest', 'PreferenceSchemaTest', 'FrontSettingsTest', 'FrontRendererTest', 'FrontDiscMotionTest', 'DiscRotationTest', 'RotationSettingsTest', 'RotationRendererTest', 'DiscMotionContinuityTest', 'TimedDiscMotionRasterTest', 'RotationHandoffTest', 'HostCompatibilityTest', 'PluginSourceMetadataTest', 'HostBindingsTest',
+    'RevealCycleTest', 'DiscExposureTest', 'DiscSettingsTest', 'PreferenceSchemaTest', 'FrontSettingsTest', 'FrontRendererTest', 'FrontDiscMotionTest', 'DiscRotationTest', 'RotationSettingsTest', 'RotationRendererTest', 'DiscMotionContinuityTest', 'TimedDiscMotionRasterTest', 'RotationHandoffTest', 'HostCompatibilityTest', 'PluginSourceMetadataTest', 'HostBindingsTest', 'DynamicHostBindingsTest',
 ]
 qa = root / 'build/qa'
 qa.mkdir(parents=True, exist_ok=True)

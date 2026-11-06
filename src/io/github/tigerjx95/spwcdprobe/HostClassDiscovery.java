@@ -13,7 +13,7 @@ final class HostClassDiscovery {
     private static final List<String> MARKERS = List.of(
             "FullScreenCover", "FloatPlaybackCover", "LocalPlayerSheetState");
 
-    record Targets(String owner, String caller, String local) {}
+    record Targets(String owner, String caller, String local, String painter) {}
 
     private static final ClassValue<Targets> TARGETS = new ClassValue<>() {
         @Override protected Targets computeValue(Class<?> anchor) {
@@ -25,7 +25,15 @@ final class HostClassDiscovery {
         }
     };
 
-    static Targets current() { return TARGETS.get(PlayerSheetState.class); }
+    static Targets current() { return current(PlayerSheetState.class.getClassLoader()); }
+
+    static Targets current(ClassLoader loader) {
+        try {
+            return TARGETS.get(Class.forName(PlayerSheetState.class.getName(), false, loader));
+        } catch (ClassNotFoundException error) {
+            throw new IllegalStateException("Host sheet class unavailable", error);
+        }
+    }
 
     private static Path archiveOf(Class<?> anchor) throws Exception {
         var resource = anchor.getResource(anchor.getSimpleName() + ".class");
@@ -39,6 +47,7 @@ final class HostClassDiscovery {
 
     static Targets discover(Path archive) throws IOException {
         var candidates = new HashMap<String, String>();
+        ClassReader painter = null;
         long scannedBytes = 0;
         try (var zip = new ZipFile(archive.toFile())) {
             var entries = zip.entries();
@@ -56,6 +65,13 @@ final class HostClassDiscovery {
                 scannedBytes += bytes.length;
                 if (scannedBytes > 128L * 1024 * 1024) throw new IOException("Host discovery scan limit exceeded");
                 var reader = new ClassReader(bytes);
+                if (CoverPainterIdentity.candidate(reader)) {
+                    if (!path.equals(reader.getClassName() + ".class")) {
+                        throw new IOException("Painter name differs from archive entry: " + path);
+                    }
+                    if (painter != null) throw new IOException("Ambiguous cover painter structure");
+                    painter = reader;
+                }
                 for (String marker : metadataMarkers(reader)) {
                     if (!path.equals(reader.getClassName() + ".class")) {
                         throw new IOException("Metadata candidate name differs from archive entry: " + path);
@@ -68,7 +84,10 @@ final class HostClassDiscovery {
         for (String marker : MARKERS) {
             if (!candidates.containsKey(marker)) throw new IOException("Missing Kotlin Metadata marker: " + marker);
         }
-        return new Targets(candidates.get(MARKERS.get(0)), candidates.get(MARKERS.get(1)), candidates.get(MARKERS.get(2)));
+        if (painter == null) throw new IOException("Missing cover painter structure");
+        CoverPainterIdentity.verify(painter);
+        return new Targets(candidates.get(MARKERS.get(0)), candidates.get(MARKERS.get(1)),
+                candidates.get(MARKERS.get(2)), painter.getClassName().replace('/', '.'));
     }
 
     private static Set<String> metadataMarkers(ClassReader reader) {

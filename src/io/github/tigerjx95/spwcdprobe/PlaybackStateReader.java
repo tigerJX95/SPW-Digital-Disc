@@ -36,7 +36,7 @@ final class PlaybackStateReader {
    }
    Object host=service.get(null);return host!=null&&Boolean.TRUE.equals(isPlaying.invoke(player.invoke(host)));
   }catch(ReflectiveOperationException|RuntimeException|LinkageError unavailable){
-   if(!warned){warned=true;report.accept("ROTATION_STATE_UNAVAILABLE "+unavailable);}return false;
+   if(!warned){warned=true;report.accept("ROTATION_STATE_UNAVAILABLE "+unavailable.getClass().getSimpleName());}return false;
   }
  }
 }
