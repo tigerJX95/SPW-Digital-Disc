@@ -5,24 +5,27 @@ final class DiscTransition {
  enum Phase { IDLE, WAITING, TRACK_WAIT, COVER, OPENING, OPEN, CLOSING, FINISHED }
  record Pose(float exposed,float scale,float centered) {}
  private Phase phase=Phase.IDLE;
- private long started,duration,brakeDuration;
+ private long started,duration,brakeDuration,coverDuration,openingDuration;
+ private DiscSettings.Speed speed=DiscSettings.Speed.STANDARD;
+ void setSpeed(DiscSettings.Speed speed){this.speed=speed;}
  private float exposure,scale=1,closeFrom,centered,closeCentered;
  private float brakeFrom,brakeCentered;
  private double brakeVelocity;
- private boolean pageEntry;
+ private boolean pageEntry,coverOnlyReturn;
+ private float returnScale;
  private Runnable completion;
  Phase phase(){return phase;}
  Pose pose(){return new Pose(exposure,scale,centered);}
  boolean closing(){return phase==Phase.CLOSING;}
  boolean finished(){return phase==Phase.FINISHED;}
  void enter(){reset();phase=Phase.WAITING;scale=.94f;centered=1;pageEntry=true;}
- void ready(long now){if(phase==Phase.WAITING){phase=Phase.COVER;started=now;}}
+ void ready(long now){if(phase==Phase.WAITING){phase=Phase.COVER;started=now;coverDuration=speed.duration(240_000_000L);openingDuration=speed.duration(700_000_000L);}}
  void trackChanged(){
   if(closing()||finished())return;
   phase=Phase.TRACK_WAIT;exposure=0;scale=1;centered=0;pageEntry=false;completion=null;
  }
- void trackReady(long now){if(phase==Phase.TRACK_WAIT){phase=Phase.OPENING;started=now;}}
- void reset(){phase=Phase.IDLE;exposure=0;scale=1;centered=0;completion=null;brakeDuration=0;brakeVelocity=0;}
+ void trackReady(long now){if(phase==Phase.TRACK_WAIT){phase=Phase.OPENING;started=now;openingDuration=speed.duration(700_000_000L);}}
+ void reset(){phase=Phase.IDLE;exposure=0;scale=1;centered=0;completion=null;brakeDuration=0;brakeVelocity=0;coverOnlyReturn=false;}
  void close(long now,Runnable done){
   close(now,done,true);
  }
@@ -31,12 +34,20 @@ final class DiscTransition {
   tick(now);
   if(!visibleDisc||phase==Phase.IDLE||phase==Phase.WAITING||phase==Phase.TRACK_WAIT){phase=Phase.FINISHED;exposure=0;scale=1;done.run();return;}
   completion=done;
+  if(phase==Phase.COVER&&scale>.94f){
+   coverOnlyReturn=true;
+   returnScale=scale;
+   started=now;
+   duration=speed.duration(180_000_000L);
+   phase=Phase.CLOSING;
+   return;
+  }
   // Preserve outgoing velocity on an interrupted eject. A short braking
   // segment stops inside the original endpoint before the return begins.
   brakeFrom=exposure;brakeCentered=centered;brakeDuration=0;brakeVelocity=0;
   if(phase==Phase.OPENING&&exposure>0&&exposure<1){
-   double u=unit(now-started,700_000_000L);
-   brakeVelocity=30*u*u*(1-u)*(1-u)/.7; // Exposure units per second.
+   double u=unit(now-started,openingDuration);
+   brakeVelocity=30*u*u*(1-u)*(1-u)/(openingDuration/1_000_000_000.0); // Exposure units per second.
    if(brakeVelocity>0){
     double seconds=Math.min(Math.min(.08,Math.max(0,now-started)/1_000_000_000.0),3*(1-exposure)/brakeVelocity);
     brakeDuration=(long)(seconds*1_000_000_000L);
@@ -44,7 +55,7 @@ final class DiscTransition {
   }
   closeFrom=Math.min(1,brakeFrom+(float)(brakeVelocity*brakeDuration/3_000_000_000.0));
   closeCentered=pageEntry?Math.max(0,brakeCentered-(closeFrom-brakeFrom)):brakeCentered;
-  started=now;duration=(long)(650_000_000L*Math.sqrt(closeFrom));
+  started=now;duration=(long)(speed.duration(650_000_000L)*Math.sqrt(closeFrom));
   // With no exposed pixels there is no return motion to wait for.
   if(closeFrom==0){finish();return;}
   phase=Phase.CLOSING;
@@ -52,16 +63,20 @@ final class DiscTransition {
  boolean tick(long now){
   float old=exposure,oldScale=scale,oldCentered=centered;Phase before=phase;
   if(phase==Phase.COVER){
-   float t=unit(now-started,240_000_000L);scale=.94f+.06f*smoother(t);
-   if(t>=1){phase=Phase.OPENING;started+=240_000_000L;}
+   float t=unit(now-started,coverDuration);scale=.94f+.06f*smoother(t);
+   if(t>=1){phase=Phase.OPENING;started+=coverDuration;}
   }
   if(phase==Phase.OPENING){
    // Quintic easing keeps velocity and acceleration quiet at both endpoints.
-   float t=unit(now-started,700_000_000L);exposure=smoother(t);scale=1;centered=pageEntry?1-exposure:0;
+   float t=unit(now-started,openingDuration);exposure=smoother(t);scale=1;centered=pageEntry?1-exposure:0;
    if(t>=1){phase=Phase.OPEN;exposure=1;}
   }else if(phase==Phase.CLOSING){
    long elapsed=now-started;
-   if(elapsed<brakeDuration){
+   if(coverOnlyReturn){
+    float t=unit(elapsed,duration);
+    scale=returnScale+(.94f-returnScale)*smoother(t);
+    if(t>=1){scale=.94f;finish();}
+   }else if(elapsed<brakeDuration){
     double u=unit(elapsed,brakeDuration);
     exposure=Math.min(closeFrom,brakeFrom+(float)(brakeVelocity*brakeDuration/1_000_000_000.0*(u-u*u+u*u*u/3)));
     centered=pageEntry?Math.max(0,brakeCentered-(exposure-brakeFrom)):brakeCentered;
@@ -82,7 +97,7 @@ final class DiscTransition {
  // displacement is below a physical pixel. Normal tick() timing stays exact;
  // callers without measured geometry retain the full animation duration.
  boolean finishSubpixelReturn(long now,float travelPixels){
-  if(phase!=Phase.CLOSING||now-started<=brakeDuration||!Float.isFinite(travelPixels)||travelPixels<=0)return false;
+  if(phase!=Phase.CLOSING||coverOnlyReturn||now-started<=brakeDuration||!Float.isFinite(travelPixels)||travelPixels<=0)return false;
   float remaining=Math.max(exposure,1-centered)*travelPixels;
   if(remaining>.75f)return false;
   finish();return true;

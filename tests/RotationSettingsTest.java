@@ -28,10 +28,13 @@ public class RotationSettingsTest {
    check(values.getLast().equals(new DiscSettings.Values(100,true,true,false)),"three fields published together");
    helper.set(DiscSettings.VINYL_KEY,true);manager.fire();DiscSettingsTest.flush();
    check(values.getLast().equals(new DiscSettings.Values(100,true,true,true)),"vinyl setting independent of other options");
+   helper.set(DiscSettings.MOTION_SPEED_KEY,"FAST");helper.set(DiscSettings.ROTATION_SPEED_KEY,"SLOW");
+   manager.fire();DiscSettingsTest.flush();
+   check(values.getLast().equals(new DiscSettings.Values(100,true,true,true,DiscSettings.Speed.FAST,DiscSettings.Speed.SLOW)),"independent speed selections");
    check(helper.save(),"save using host storage");
   }
   try(var settings=new DiscSettings(new DiscSettingsTest.Manager(DiscSettingsTest.helper(file)),values::add)){
-   check(values.getLast().equals(new DiscSettings.Values(100,true,true,true)),"restart restores rotation and other fields");
+   check(values.getLast().equals(new DiscSettings.Values(100,true,true,true,DiscSettings.Speed.FAST,DiscSettings.Speed.SLOW)),"restart restores both speeds and other fields");
   }
   var reader=new PlaybackStateReader();
   var verify=PlaybackStateReader.class.getDeclaredMethod("verifyHost");verify.setAccessible(true);verify.invoke(reader);

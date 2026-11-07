@@ -69,6 +69,7 @@ public final class CdPageProbePlugin extends SpwPlugin {
   void freezeRotation(long now){rotationAngle.setValue(rotation.freeze(now));}
   void closeMotion(long now,Runnable done,boolean visibleDisc){
    freezeRotation(now);
+   motion.setSpeed(displaySettings.getValue().motionSpeed());
    motion.close(now,done,visibleDisc);pose.setValue(motion.pose());
   }
   void advanceMotion(long now){
@@ -277,7 +278,7 @@ public final class CdPageProbePlugin extends SpwPlugin {
    // layout nodes must not be traversed by the local-image decode worker.
    sourceObserver=new javax.swing.Timer(100,event->observeSources());sourceObserver.start();
    animationClock=new javax.swing.Timer(16,event->animateFrames());animationClock.setCoalesce(true);animationClock.start();
-   report("START 1.4.0 Host Binding; retained pixels are not readiness; hooks="+handles.size());
+   report("START 1.5.0 Host Binding; retained pixels are not readiness; hooks="+handles.size());
   }catch(Throwable e){stop();throw new IllegalStateException("SelfDraw startup failed",e);}
  }
  @SuppressWarnings("unchecked")
@@ -461,6 +462,7 @@ public final class CdPageProbePlugin extends SpwPlugin {
    frame.refreshReady();
    if(frame.nativeRoot==null||!frame.nativeRoot.isAttached()){frame.rotationAngle.setValue(frame.rotation.sample(song,rotate,false,false,now));continue;}
    try{
+    frame.motion.setSpeed(display.motionSpeed());
     if(frame.motion.phase()==DiscTransition.Phase.IDLE){frame.motion.enter();frame.pose.setValue(frame.motion.pose());}
     sourceChanged|=frame.observe(song);
     boolean switched=frame.trackGate.observe(song,now);
@@ -478,7 +480,7 @@ public final class CdPageProbePlugin extends SpwPlugin {
     boolean canRotate=rotate&&song!=null&&frame.motion.phase()==DiscTransition.Phase.OPEN
       &&(frame.fallbackActive||frame.ownedCover!=null)&&display.amount()>0&&discResolved(song);
     if(canRotate&&playing==null)playing=playbackState.playing(this::report);
-    frame.rotationAngle.setValue(frame.rotation.sample(song,rotate,canRotate&&playing,canRotate,now));
+    frame.rotationAngle.setValue(frame.rotation.sample(song,rotate,canRotate&&playing,canRotate,now,display.rotationSpeed().rotationPeriod));
    }catch(Exception error){frame.rotation.sample(song,rotate,false,false,now);frame.motion.reset();frame.pose.setValue(frame.motion.pose());report("ANIMATION_ERROR "+error.getClass().getSimpleName());}
   }}
   // The faster animation clock may see a new source before sourceObserver.

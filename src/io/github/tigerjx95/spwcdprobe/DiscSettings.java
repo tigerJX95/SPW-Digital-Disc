@@ -8,7 +8,18 @@ final class DiscSettings implements AutoCloseable {
  static final String FRONT_KEY="disc_in_front";
  static final String ROTATE_KEY="disc_rotation";
  static final String VINYL_KEY="disc_vinyl";
- record Values(int amount,boolean front,boolean rotate,boolean vinyl){}
+ static final String MOTION_SPEED_KEY="disc_motion_speed";
+ static final String ROTATION_SPEED_KEY="disc_rotation_speed";
+ enum Speed {
+  SLOW(1.35,30_000_000_000L),STANDARD(1.0,DiscRotation.PERIOD),FAST(.75,12_000_000_000L);
+  private final double motionScale;
+  final long rotationPeriod;
+  Speed(double motionScale,long rotationPeriod){this.motionScale=motionScale;this.rotationPeriod=rotationPeriod;}
+  long duration(long nanos){return Math.round(nanos*motionScale);}
+ }
+ record Values(int amount,boolean front,boolean rotate,boolean vinyl,Speed motionSpeed,Speed rotationSpeed){
+  Values(int amount,boolean front,boolean rotate,boolean vinyl){this(amount,front,rotate,vinyl,Speed.STANDARD,Speed.STANDARD);}
+ }
  static final Values DEFAULT=new Values(DiscExposure.DEFAULT,false,false,false);
  private final ConfigManager manager;
  private final Consumer<Values> update;
@@ -34,7 +45,11 @@ final class DiscSettings implements AutoCloseable {
   boolean vinyl;
   try{Object value=config.get(VINYL_KEY,false);vinyl=Boolean.TRUE.equals(value)||value instanceof String text&&text.equalsIgnoreCase("true");}
   catch(RuntimeException invalid){vinyl=false;}
-  return new Values(amount,front,rotate,vinyl);
+  return new Values(amount,front,rotate,vinyl,speed(config,MOTION_SPEED_KEY),speed(config,ROTATION_SPEED_KEY));
+ }
+ private static Speed speed(ConfigHelper config,String key){
+  try{return Speed.valueOf(config.get(key,Speed.STANDARD.name()));}
+  catch(RuntimeException invalid){return Speed.STANDARD;}
  }
  private void changed(ConfigHelper config){
   if(!active)return;

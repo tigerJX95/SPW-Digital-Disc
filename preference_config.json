@@ -24,7 +24,7 @@
           "type": "switch",
           "key": "disc_rotation",
           "title": "播放时旋转碟片",
-          "summary": "默认关闭。出碟完成后约 20 秒转一圈；暂停或收起展示页时停在当前角度，恢复后继续。",
+          "summary": "默认关闭。暂停或收起展示页时停在当前角度，恢复后继续。",
           "default_value": false
         },
         {
@@ -33,6 +33,40 @@
           "title": "默认盘面使用黑胶唱片",
           "summary": "仅在没有可用的自定义盘面时生效。关闭时使用专辑封面 CD。",
           "default_value": false
+        },
+        {
+          "type": "list",
+          "key": "disc_motion_speed",
+          "title": "出收碟速度",
+          "summary": "控制封面过渡及碟片滑出、收回的速度。",
+          "entries": [
+            "慢速",
+            "标准",
+            "快速"
+          ],
+          "entry_values": [
+            "SLOW",
+            "STANDARD",
+            "FAST"
+          ],
+          "default_value": "STANDARD"
+        },
+        {
+          "type": "list",
+          "key": "disc_rotation_speed",
+          "title": "碟片旋转速度",
+          "summary": "仅在开启播放时旋转碟片后生效。慢速 30 秒、标准 20 秒、快速 12 秒一圈。",
+          "entries": [
+            "慢速",
+            "标准",
+            "快速"
+          ],
+          "entry_values": [
+            "SLOW",
+            "STANDARD",
+            "FAST"
+          ],
+          "default_value": "STANDARD"
         }
       ]
     }
