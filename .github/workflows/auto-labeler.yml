@@ -1,0 +1,60 @@
+name: 自动标记问题反馈渠道
+
+on:
+  issues:
+    types: [opened]
+
+jobs:
+  label-platform:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: 添加渠道标签
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const body = (context.payload.issue.body ?? '').replace(/\r\n/g, '\n').trimStart();
+            // 只读取 Bug 表单的第一个字段，避免匹配截图说明或问题描述里的文字。
+            const firstField = body.match(/^### ([^\n]+)\n(?:[ \t]*\n)*([^\n]+)/);
+            if (!firstField) return;
+
+            const heading = firstField[1].trim();
+            const answer = firstField[2].trim();
+            if (!answer || answer.startsWith('### ')) return;
+
+            const steamLabels = new Map([
+              ['Windows', { name: 'steam windows', color: '1d76db' }],
+              ['Linux', { name: 'steam linux', color: '0e8a16' }],
+            ]);
+
+            let label;
+            if (heading === '🎵 微软商店版播放器版本 / Microsoft Store Player Version') {
+              label = { name: 'Microsoft Store', color: '0366d6' };
+            } else if (heading === '💻 Steam 运行系统 / Steam Operating System') {
+              label = steamLabels.get(answer);
+            }
+            if (!label) return;
+
+            const repository = context.repo;
+            const issues = github.rest.issues;
+            const lookup = { ...repository, name: label.name };
+
+            // 首次使用某个渠道时创建标签。并行提交可能已经创建了同名标签。
+            try {
+              await issues.getLabel(lookup);
+            } catch (error) {
+              if (error.status !== 404) throw error;
+              try {
+                await issues.createLabel({ ...repository, ...label });
+              } catch (creationError) {
+                if (creationError.status !== 422) throw creationError;
+                await issues.getLabel(lookup);
+              }
+            }
+
+            await issues.addLabels({
+              ...repository,
+              issue_number: context.issue.number,
+              labels: [label.name],
+            });
