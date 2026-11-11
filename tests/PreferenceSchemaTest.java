@@ -8,7 +8,7 @@ public class PreferenceSchemaTest {
   var parser=Class.forName(TestHost.parser()).getMethod("\u037f",String.class);
   var groups=(List<?>)parser.invoke(null,Files.readString(Path.of("preference_config.json")));
   check(groups.size()==1,"one native settings group");Object group=groups.get(0);
-  var items=(List<?>)group.getClass().getMethod("ԩ").invoke(group);check(items.size()==6,"exposure slider, three switches and two speed lists");
+  var items=(List<?>)group.getClass().getMethod("ԩ").invoke(group);check(items.size()==7,"exposure slider, three switches, two speed lists and order button");
   Object slider=items.get(0);var type=slider.getClass();check(type.getName().equals(TestHost.model()+"$Ԫ"),"host recognizes actual seekbar model");
   check(type.getMethod("\u037f").invoke(slider).equals(DiscExposure.KEY),"schema and runtime use same key");
   check(type.getMethod("Ԭ").invoke(slider).equals("config.json"),"schema and runtime use same file");
@@ -32,6 +32,13 @@ public class PreferenceSchemaTest {
    check(list.getMethod("ԫ").invoke(speed).equals(List.of("SLOW","STANDARD","FAST")),"speed values");
    check(list.getMethod("Ԭ").invoke(speed).equals("STANDARD"),"standard default");
   }
-  System.out.println("PASS actual SPW preference_config.json parser: seekbar, three switches and two speed lists, matching keys/file, 0-100 bounds/default50 and all switches default off");
+  Object order=items.get(6);var button=order.getClass();
+  check(button.getName().equals(TestHost.model()+"$Ϳ"),"native button model");
+  String action=(String)button.getMethod("Ԫ").invoke(order);
+  check(action.equals(DiscOrderDialog.class.getName()+".open"),"button targets the plugin callback");
+  var method=DiscOrderDialog.class.getMethod("open");
+  check(java.lang.reflect.Modifier.isStatic(method.getModifiers()),"callback is public and static");
+  method.invoke(null); // Host may open settings even while the plugin is stopped.
+  System.out.println("PASS actual SPW preference_config.json parser: seekbar, three switches, two speed lists and order button, matching keys/file, 0-100 bounds/default50 and all switches default off");
  }
 }

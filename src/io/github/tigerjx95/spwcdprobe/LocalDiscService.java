@@ -11,7 +11,17 @@ import javax.imageio.stream.ImageInputStream;
 import static java.nio.file.LinkOption.NOFOLLOW_LINKS;
 /** Read-only, background disc artwork lookup. Publications and drawing share one lock. */
 final class LocalDiscService<T extends AutoCloseable> implements AutoCloseable {
- static final List<String> NAMES=List.of("cd.png","cd.jpg","disc.png","disc.jpg");
+ static final List<String> DEFAULT_NAMES=List.of("cd.png","cd.jpg","disc.png","disc.jpg");
+ static List<String> candidateNames(String configured){
+  if(configured==null||configured.isBlank()||configured.length()>2048)return DEFAULT_NAMES;
+  var ordered=new LinkedHashSet<String>();
+  for(String entry:configured.split("[,，]")){
+   String name=entry.strip();
+   if(DEFAULT_NAMES.contains(name))ordered.add(name);
+  }
+  ordered.addAll(DEFAULT_NAMES);
+  return List.copyOf(ordered);
+ }
  static final int MAX_BYTES=32*1024*1024,MAX_DIMENSION=8192;
  static final long MAX_PIXELS=16L*1024*1024;
  interface Decoder<T>{T decode(byte[] bytes,int width,int height)throws Exception;}
@@ -42,6 +52,14 @@ final class LocalDiscService<T extends AutoCloseable> implements AutoCloseable {
  private boolean resolved;
  private volatile boolean closed;
  private long nextScan,generation;
+ private List<String> names=DEFAULT_NAMES;
+ void setNames(List<String> candidates){
+  synchronized(lock){
+   if(closed||names.equals(candidates))return;
+   names=List.copyOf(candidates);generation++;nextScan=0;
+   rejected.clear();
+  }
+ }
  LocalDiscService(Supplier<String> song,Decoder<T> decoder,Runnable changed,Consumer<String> log){this(song,decoder,changed,log,System::nanoTime);}
  LocalDiscService(Supplier<String> song,Decoder<T> decoder,Runnable changed,Consumer<String> log,LongSupplier clock){this.song=song;this.decoder=decoder;this.changed=changed;this.log=log;this.clock=clock;}
  void start(){
@@ -97,20 +115,24 @@ final class LocalDiscService<T extends AutoCloseable> implements AutoCloseable {
   if(closed)return;
   String current=song.get();long now=clock.getAsLong(),ticket;
   request(current);
+  List<String> candidates;
   synchronized(lock){
-   if(now<nextScan)return;nextScan=now+TimeUnit.SECONDS.toNanos(1);ticket=generation;
+   if(now<nextScan)return;nextScan=now+TimeUnit.SECONDS.toNanos(1);ticket=generation;candidates=names;
   }
-  Path directory=directory(current);boolean found=false;
+  Path directory=directory(current);
   if(directory==null){
    finishDefault(current,ticket);
    diagnostic("LOCAL_CD_DEFAULT no accessible song directory");return;
   }
-  if(directory!=null)for(String name:NAMES){
+  for(String name:candidates){
    if(closed||!Objects.equals(current,song.get()))return;
    Path file=directory.resolve(name);Stamp observed=null;
    try{
     if(!Files.isRegularFile(file,NOFOLLOW_LINKS)){
-     synchronized(lock){evictPathLocked(file,null);}
+     synchronized(lock){
+      if(closed||ticket!=generation)return;
+      evictPathLocked(file,null);
+     }
      continue;
     }
     Stamp stamp=stamp(file);observed=stamp;
@@ -158,20 +180,20 @@ final class LocalDiscService<T extends AutoCloseable> implements AutoCloseable {
      }
      asset=decoded;publishedSong=current;publishedStamp=stamp;resolvedSong=current;resolved=true;changed.run();
     }
-    found=true;diagnostic("LOCAL_CD_READY "+name+" "+dimensions[0]+"x"+dimensions[1]);return;
+    diagnostic("LOCAL_CD_READY "+name+" "+dimensions[0]+"x"+dimensions[1]);return;
    }catch(Exception|LinkageError e){
     synchronized(lock){
      if(closed||ticket!=generation||!Objects.equals(current,requestedSong)||!Objects.equals(current,song.get()))return;
      if(observed!=null){
       rejected.put(file,new Rejected(observed,clock.getAsLong()+REJECT_RETRY_NANOS));
-      while(rejected.size()>NAMES.size())rejected.remove(rejected.keySet().iterator().next());
+      while(rejected.size()>candidates.size())rejected.remove(rejected.keySet().iterator().next());
      }
     }
     diagnostic("LOCAL_CD_REJECTED "+name+" "+failure(e));
    }
   }
-  if(!found)finishDefault(current,ticket);
-  diagnostic("LOCAL_CD_DEFAULT no usable cd.png/cd.jpg/disc.png/disc.jpg");
+  finishDefault(current,ticket);
+  diagnostic("LOCAL_CD_DEFAULT no usable same-directory image");
  }
  private static Stamp stamp(Path file)throws IOException{
   var attrs=Files.readAttributes(file,java.nio.file.attribute.BasicFileAttributes.class,NOFOLLOW_LINKS);
@@ -203,6 +225,14 @@ final class LocalDiscService<T extends AutoCloseable> implements AutoCloseable {
  }
  // false means lookup completed without usable artwork; true means local image
  // drawn OR still pending (no disc). Resolve and draw under one publication lock.
+ record ArtworkStatus(boolean resolved,String fileName){}
+ ArtworkStatus artworkStatus(String current){
+  synchronized(lock){
+   if(closed||!resolved||!Objects.equals(current,requestedSong)||!Objects.equals(current,resolvedSong))
+    return new ArtworkStatus(false,null);
+   return new ArtworkStatus(true,asset==null?null:publishedStamp.path().getFileName().toString());
+  }
+ }
  boolean isResolved(String currentSong){
   synchronized(lock){return !closed&&currentSong!=null&&!currentSong.isBlank()&&resolved&&Objects.equals(currentSong,resolvedSong)&&Objects.equals(currentSong,song.get());}
  }

@@ -20,6 +20,7 @@ final class CoverAvailability {
   if(ticket==null||ticket.generation()!=generation||ticket.request()!=request||!Objects.equals(ticket.song(),current)||!Objects.equals(song,current))return;
   resolved=true;missing=absent;
  }
+ synchronized boolean available(String current){return resolved&&!missing&&Objects.equals(song,current);}
  synchronized boolean missing(String current){return resolved&&missing&&Objects.equals(song,current);}
  synchronized boolean refreshNeeded(String current,long now){
   observe(current,now);

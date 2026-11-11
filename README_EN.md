@@ -4,11 +4,10 @@
 
 Adds a digital CD presentation to Salt Player (SPW), with a complete album cover and a CD extending from its right side.
 
-Current version: **v1.5.0**
+Current version: **v1.6.0**
 
-- **Fix abrupt transitions when returning during cover enlargement**: before the disc appears, the cover shrinks smoothly from its current size before the primary detail view returns.
-- **Independent speed settings**: choose Slow, Standard or Fast for ejection/retraction and rotation independently. When rotation is enabled, the three presets take about 30, 20 and 12 seconds per turn.
-- **Steam compatibility**: verified on Windows and Ubuntu 26.04.1 LTS (Linux).
+- **Custom disc artwork lookup order**: lets you change the lookup order of `cd.png`, `cd.jpg`, `disc.png` and `disc.jpg`.
+- **Current disc artwork source**: the order dialog shows the matched file or fallback source and refreshes when the track changes.
 
 [Update history](CHANGELOG.md) (Chinese)
 
@@ -26,7 +25,7 @@ I wanted to bring this digital record experience to Salt Player: enjoying the co
 
 - **Primary detail page**: keeps SPW's native album cover, lyrics, and playback controls.
 - **Secondary display page**: clicking the album cover opens a larger, centered presentation of the complete cover and a CD on its right. The cover is not squeezed into half an image.
-- **Custom disc artwork**: searches the current song's directory in the order `cd.png → cd.jpg → disc.png → disc.jpg`. If a higher-priority file cannot be decoded, the next file is tried.
+- **Custom disc artwork**: searches the current song's directory in the default order below or the order set in plugin preferences. If a higher-priority file cannot be decoded, the next file is tried.
 - **Generated disc artwork**: when custom artwork is unavailable, a copy of the album cover fills a circular CD with a narrow white edge, translucent annular hub, translucent center hole and tiny white spindle. Two narrow silver bevels use adjacent highlights and grooves around a translucent hub field, preserving the artwork underneath; the main cover remains complete.
 - **Transparent images**: custom PNG files retain their existing transparent backgrounds and center holes. An antialiased circular outer mask is applied. No extra center hole or hub ring is added.
 - **Front-disc display**: enable the native plugin switch to draw the disc over the cover. Off by default. Front mode uses whole-disc motion with a short uniform fade. Compare at exposure 50; in front mode exposure controls horizontal travel, while 0 still shows only the cover.
@@ -43,7 +42,7 @@ https://github.com/user-attachments/assets/8a289172-d79b-4e2e-9ba2-c7dc9ee5d86c
 
 ## Installation and use
 
-V1.5.0 has been tested successfully with the **Steam edition of SPW on Windows and Ubuntu 26.04.1 LTS (Linux)**. Interface mappings cover SPW 1.19.0 and 1.19.3 from the Microsoft Store. The plugin uses SPW's internal drawing interfaces, so later SPW versions may require a new adaptation.
+The steps below install **V1.6.0**. Interface mappings cover SPW 1.19.0 and 1.19.3 from the Microsoft Store. See [Verified SPW host versions](#verified-spw-host-versions) for Steam test results on Windows and Ubuntu 26.04.1 LTS (Linux). The plugin uses SPW's internal drawing interfaces, so later SPW versions may require compatibility updates.
 
 1. Obtain the compiled `.spmod` file. The source ZIP cannot be installed directly; see the build instructions below to compile it yourself.
 2. In SPW's plugin manager, use the local plugin import option to select the `.spmod` file.
@@ -71,7 +70,9 @@ For example, use `D:\Music\Album\cd.png` alongside `D:\Music\Album\01.flac`, or 
 | 3 | `disc.png` |
 | 4 | `disc.jpg` |
 
-If all four files are readable, `cd.png` takes priority. Use the lowercase names above. Songs in one directory share the artwork. Lookups use the access rights of the account running the player. HTTP and HTTPS streaming URLs are excluded from artwork lookup.
+By default, the first image that can be read and decoded takes priority. Use the lowercase names above. Songs in one directory share the artwork. Lookups use the access rights of the account running the player. HTTP and HTTPS streaming URLs are excluded from artwork lookup.
+
+In plugin settings, click “自定义盘面查找顺序” (Custom disc artwork lookup order), drag the four rows into the desired order, and click Confirm. The top row is checked first. Reset restores the order shown above. The footer identifies the source for the current track, such as a custom image named `cd.png` or a CD-style disc generated from the album cover. The saved lookup order applies to all tracks.
 
 For a transparent background or center hole, use a PNG with those transparent areas already prepared.
 
@@ -99,6 +100,7 @@ Open SPW Digital Disc settings in the plugin manager. The host saves and restore
 
 | Setting | Default | Behavior |
 | --- | --- | --- |
+| Custom disc artwork lookup order | Order shown above | Open the editor and drag the four filenames to set their priority |
 | Disc exposure | 50 | Range 0–100; 0 shows only the cover, 100 moves the entire disc out; controls horizontal travel |
 | Disc in front | Off | Controls overlap order independently of exposure |
 | Rotate while playing | Off | Soft start after ejection, then clockwise at about 20 seconds per turn at Standard speed; freezes on pause and continues on resume |
@@ -124,12 +126,12 @@ Verified on physical machines:
 
 Offline tests cover interface resolution, cover calls, configuration storage, images, animations and rotation state. They do not run Windows native playback or Skia rendering. Startup verifies playback-controller and sheet-state fingerprints, then locates the cover entry, caller and sheet-state accessor using metadata, signatures and a unique call relationship. The cover painter must be the unique structural match and pass an implementation fingerprint normalized for its own obfuscated identifiers and debug metadata. Discovery results are cached per host class loader. Missing or ambiguous targets prevent activation with a detailed error. Startup also validates playback and artwork-loading interfaces and rejects incompatible hosts. If playback state cannot be read during operation, rotation stops and a warning is logged.
 
-Host updates that prevent loading take priority for compatibility fixes and may receive a patch release. A version-number change alone does not require a release when features still work. New adaptations retain verified older profiles where possible. Include the host version, channel, plugin version and full error when reporting a problem.
+Include the host version, channel, plugin version and full error when reporting a problem.
 
 ## Compatibility and limitations
 
 - SPW 1.19.0 and 1.19.3 rendering and state verification profiles are included. The three cover-entry classes and the cover painter are discovered dynamically. The painter retains a normalized implementation fingerprint; sheet-state, playback and artwork-loading classes retain their existing fingerprint checks.
-- Disc images are searched only in the audio file's directory using fixed filenames, without recursion, custom paths or automatic downloads.
+- Disc images are searched only in the audio file's directory using allowed filenames, without recursion, custom paths or automatic downloads.
 - JPG preparation masks the outer circle but does not detect the disc, remove backgrounds inside the circle or create a center hole.
 - If playback state cannot be read, rotation stops and logs `ROTATION_STATE_UNAVAILABLE`; artwork display retains its existing behavior.
 - Window sizes, display scaling and rapid page changes depend on host behavior. Report problems using the repository's Issue templates.
@@ -201,7 +203,7 @@ If using PowerShell, configure the same environment variables and run this in th
 After the build reports `BUILD SUCCESSFUL`, look in the source directory's `dist` folder for:
 
 ```text
-SPW_Digital_Disc_v1.5.0.spmod
+SPW_Digital_Disc_v1.6.0.spmod
 ```
 
 This is the installation package that SPW can import. You do not need to ZIP the entire source directory or rename its extension. The `build` directory contains intermediate build output, not the installation package.

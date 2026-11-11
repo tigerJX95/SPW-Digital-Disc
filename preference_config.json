@@ -67,6 +67,12 @@
             "FAST"
           ],
           "default_value": "STANDARD"
+        },
+        {
+          "type": "button",
+          "title": "自定义盘面查找顺序",
+          "summary": "拖动四种盘面文件名调整优先级。",
+          "on_click": "io.github.tigerjx95.spwcdprobe.DiscOrderDialog.open"
         }
       ]
     }

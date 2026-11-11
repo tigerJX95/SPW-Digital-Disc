@@ -30,12 +30,16 @@ public class DiscSettingsTest {
   check(values.equals(List.of(50,90)),"rapid queued changes coalesce to newest value");
   config.set(DiscExposure.KEY,"bad");manager.fire();flush();check(values.get(values.size()-1)==50,"malformed stored value returns to default");
   config.set(DiscExposure.KEY,500f);manager.fire();flush();check(values.get(values.size()-1)==100,"out-of-range value clamped");
+  var order=List.of("disc.png","cd.jpg","cd.png","disc.jpg");
+  check(settings.saveOrder(order),"save ordered filenames using host storage");
+  flush();
+  check(settings.order().equals(order),"editor reloads saved order");
   int before=values.size();var late=manager.listeners.get(0);
   SwingUtilities.invokeAndWait(()->{config.set(DiscExposure.KEY,0f);manager.fire();settings.close();});flush();
   late.accept(config);flush();check(values.size()==before&&manager.listeners.isEmpty()&&manager.closes==1,"close removes listener, closes owned manager and ignores queued/late updates");
   settings.close();check(manager.closes==1,"idempotent close");
   Manager restored=new Manager(helper(file));var restart=new ArrayList<Integer>();
-  try(DiscSettings next=new DiscSettings(restored,v->restart.add(v.amount()))){check(restart.equals(List.of(75)),"restart restores saved value rather than unsaved slider changes");}
+  try(DiscSettings next=new DiscSettings(restored,v->{restart.add(v.amount());check(v.localNames().getFirst().equals("disc.png"),"restore ordered filenames");})){check(restart.equals(List.of(100)),"restart restores saved exposure and filenames rather than unsaved slider changes");}
   System.out.println("PASS actual host ConfigHelper default/save/reload, settings-key integration, newest EDT publication, malformed and range validation, queued-callback cancellation, exact listener/manager cleanup and saved restart value");
  }
 }

@@ -255,8 +255,9 @@ public final class CdPageProbePlugin extends SpwPlugin {
    coverStatus=new HostCoverStatus(coverAvailability,this::currentSong);
    handles.add(coverStatus.install());
    discSettings=new DiscSettings(WorkshopApi.manager().createConfigManager(),value->{
+    if(localDiscs!=null)localDiscs.setNames(value.localNames());
     displaySettings.setValue(value);report("DISC_SETTINGS amount="+value.amount()+" front="+value.front()+" rotate="+value.rotate()+" vinyl="+value.vinyl());
-   });
+   },this::artworkSource);
    handles.add(WorkshopApi.hookRegistrar().replaceComposable(host.cover.getDeclaringClass().getName(),host.cover.getName(),host.caller,
     List.of("kotlin.jvm.functions.Function0","boolean","boolean","boolean","androidx.compose.ui.Modifier"),50,new ComposableHook(){
      @Override public void Content(UiHookCall call,Composer composer,int changed){content(call,composer);}
@@ -272,13 +273,14 @@ public final class CdPageProbePlugin extends SpwPlugin {
      }
     }));
    localDiscs=new LocalDiscService<>(this::currentSong,DiscImage::decode,()->discRevision.setValue(discRevision.getValue()+1),this::report);
+   localDiscs.setNames(displaySettings.getValue().localNames());
    localDiscs.start();
    enabled.setValue(true);running=true;
    // Swing Timer actions execute on Compose Desktop's UI event thread; native
    // layout nodes must not be traversed by the local-image decode worker.
    sourceObserver=new javax.swing.Timer(100,event->observeSources());sourceObserver.start();
    animationClock=new javax.swing.Timer(16,event->animateFrames());animationClock.setCoalesce(true);animationClock.start();
-   report("START 1.5.0 Host Binding; retained pixels are not readiness; hooks="+handles.size());
+   report("START 1.6.0 Host Binding; retained pixels are not readiness; hooks="+handles.size());
   }catch(Throwable e){stop();throw new IllegalStateException("SelfDraw startup failed",e);}
  }
  @SuppressWarnings("unchecked")
@@ -422,6 +424,21 @@ public final class CdPageProbePlugin extends SpwPlugin {
   Frame match=null;
   for(Frame frame:current)if(frame.owns(painter,drawSize)){if(match!=null&&match!=frame)return null;match=frame;}
   return match;
+ }
+ private String artworkSource(){
+  try{
+   String song=currentSong();
+   if(song==null||song.isBlank())return "未播放曲目";
+   var service=localDiscs;
+   if(service==null)return "盘面来源暂不可用";
+   var artwork=service.artworkStatus(song);
+   if(!artwork.resolved())return "正在查找盘面图片…";
+   if(artwork.fileName()!=null)return "使用自定义图片 "+artwork.fileName();
+   boolean vinyl=displaySettings.getValue().vinyl();
+   if(coverAvailability.missing(song))return vinyl?"无可用图片，显示空白黑胶":"无可用图片，显示空白 CD";
+   if(coverAvailability.available(song))return vinyl?"由专辑封面生成（黑胶样式）":"由专辑封面生成（CD 样式）";
+   return "未找到可用自定义图片，等待专辑封面";
+  }catch(RuntimeException unavailable){return "盘面来源暂不可用";}
  }
  private boolean discResolved(){try{return localDiscs!=null&&discResolved(currentSong());}catch(Exception unavailable){return false;}}
  private boolean discResolved(String song){return localDiscs!=null&&localDiscs.isResolved(song);}
