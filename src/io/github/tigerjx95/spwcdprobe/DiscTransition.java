@@ -34,7 +34,8 @@ final class DiscTransition {
   tick(now);
   if(!visibleDisc||phase==Phase.IDLE||phase==Phase.WAITING||phase==Phase.TRACK_WAIT){phase=Phase.FINISHED;exposure=0;scale=1;done.run();return;}
   completion=done;
-  if(phase==Phase.COVER&&scale>.94f){
+  // The cover has finished enlarging at the first opening frame, before any disc travel.
+  if(pageEntry&&exposure==0&&scale>.94f){
    coverOnlyReturn=true;
    returnScale=scale;
    started=now;

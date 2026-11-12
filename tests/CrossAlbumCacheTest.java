@@ -19,8 +19,8 @@ public class CrossAlbumCacheTest {
  public static void main(String[] args)throws Exception{
   Path root=Files.createTempDirectory("cross-album-cache");byte[] png=LocalDiscServiceTest.png(0xffb42658);
   var songs=new ArrayList<String>();for(int i=0;i<6;i++)songs.add(album(root,"album"+i,png));
-  var song=new AtomicReference<String>();var made=new ArrayList<Asset>();var decodes=new AtomicInteger();var log=new ArrayList<String>();
-  var service=new LocalDiscService<Asset>(song::get,(b,w,h)->{decodes.incrementAndGet();var a=new Asset();made.add(a);return a;},()->{},log::add);
+  var song=new AtomicReference<String>();var made=new ArrayList<Asset>();var decodes=new AtomicInteger();var revisions=new AtomicInteger();var duringDecode=new AtomicReference<Runnable>();var log=new ArrayList<String>();
+  var service=new LocalDiscService<Asset>(song::get,(b,w,h)->{decodes.incrementAndGet();var probe=duringDecode.getAndSet(null);if(probe!=null)probe.run();var a=new Asset();made.add(a);return a;},revisions::incrementAndGet,log::add);
   var first=new ArrayList<Asset>();
   for(int i=0;i<4;i++){select(service,song,songs.get(i));first.add(get(service,song.get()));}
   check(size(service)==4&&decodes.get()==4,"four small albums share bounded cache");
@@ -31,6 +31,7 @@ public class CrossAlbumCacheTest {
   service.poll();check(get(service,song.get())==first.get(0),"revalidated cache publication");
   Path art=Path.of(song.get()).getParent().resolve("cd.png");
   Files.setLastModifiedTime(art,FileTime.fromMillis(Files.getLastModifiedTime(art).toMillis()+5000));
+  duringDecode.set(()->check("cd.png".equals(service.artworkStatus(song.get()).fileName())&&first.get(0).closed==0,"replacement decode keeps active artwork drawable"));
   int before=decodes.get();LocalDiscServiceTest.fresh(service);service.poll();
   check(first.get(0).closed==1&&decodes.get()==before+1&&get(service,song.get())!=first.get(0),"changed metadata invalidates active cached pixels");
   Asset changed=get(service,song.get());
@@ -44,8 +45,10 @@ public class CrossAlbumCacheTest {
   Asset current=get(service,song.get());service.discard(song.get());
   check(current.closed==1&&get(service,song.get())==null,"draw failure removes cache ownership");
   LocalDiscServiceTest.fresh(service);service.poll();check(get(service,song.get())!=current,"discarded asset never reused");
+  int beforeDeletion=revisions.get();
   current=get(service,song.get());Files.delete(art);LocalDiscServiceTest.fresh(service);service.poll();
   check(current.closed==1&&get(service,song.get())==null,"deleted image invalidated, no stale cache display");
+  check(revisions.get()==beforeDeletion+1&&service.isResolved(song.get()),"deleting the last artwork publishes the default and invalidates drawing exactly once");
   select(service,song,songs.get(2));check(get(service,song.get())!=null,"another album survives deletion/default in A");
   check(log.stream().anyMatch(s->s.startsWith("LOCAL_CD_CACHE_HIT")),"cache hits observable in diagnostics");
   song.set(null);service.request(null);check(size(service)==0&&bytes(service)==0,"no-media clears entire cache");

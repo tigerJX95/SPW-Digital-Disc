@@ -43,11 +43,25 @@ public class DiscTransitionTest {
    m.tick(closed-1_000_000L);check(calls.get()==count,"no early preset completion");
    m.tick(closed);check(calls.get()==count+1,"preset close completes once");
    m.enter();m.ready(t);
+   long firstOpeningFrame=t+speed.duration(240_000_000L);
+   m.tick(firstOpeningFrame);
+   var boundary=m.pose();
+   int beforeBoundaryReturn=calls.get();
+   check(m.phase()==DiscTransition.Phase.OPENING&&boundary.exposed()==0&&boundary.scale()==1,"opening begins after full cover enlargement");
+   m.close(firstOpeningFrame,calls::incrementAndGet);
+   check(m.closing()&&m.pose().equals(boundary)&&calls.get()==beforeBoundaryReturn,"return at the cover-to-disc boundary preserves the pose");
+   long coverReturn=speed.duration(180_000_000L);
+   m.tick(firstOpeningFrame+coverReturn/2);
+   check(m.pose().exposed()==0&&m.pose().scale()<1&&m.pose().scale()>.94f,"boundary return shrinks only the cover");
+   m.tick(firstOpeningFrame+coverReturn);
+   check(m.finished()&&calls.get()==beforeBoundaryReturn+1,"boundary return completes exactly once");
+
+   m.enter();m.ready(t);
    long mid=t+speed.duration(240_000_000L)+speed.duration(350_000_000L);
    m.tick(mid);var before=m.pose();m.close(mid,calls::incrementAndGet);
    check(m.pose().equals(before),"interruption retains pose at each speed");
    m.tick(mid+1_000_000L);check(m.pose().exposed()>before.exposed(),"interrupted motion brakes smoothly");
-   m.tick(mid+2_000_000_000L);check(calls.get()==count+2,"interrupted return completes once");
+   m.tick(mid+2_000_000_000L);check(calls.get()==beforeBoundaryReturn+2,"interrupted return completes once");
   }
   System.out.println("PASS cover-first sequencing, 700ms progressive easing, monotonic retract, deferred/exactly-once return, repeated-click guard, reverse at six entry points, load wait, reset cancellation, delayed frame catchup");
  }

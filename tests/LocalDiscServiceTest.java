@@ -20,6 +20,28 @@ public class LocalDiscServiceTest {
   ByteArrayOutputStream out=new ByteArrayOutputStream();ImageIO.write(image,"png",out);return out.toByteArray();
  }
  static Asset get(LocalDiscService<Asset> service,String song)throws Exception{AtomicReference<Asset> value=new AtomicReference<>();service.drawFor(song,value::set);return value.get();}
+ private static void checkPollCannotRewindRequest(String previous,String current)throws Exception{
+  var song=new AtomicReference<>(previous);
+  var reads=new AtomicBoolean(true);
+  var revisions=new AtomicInteger();
+  var clock=new AtomicLong(10_000_000_000L);
+  var serviceRef=new AtomicReference<LocalDiscService<Asset>>();
+  try(var service=new LocalDiscService<Asset>(()->{
+   String sampled=song.get();
+   if(reads.getAndSet(false)){
+    song.set(current);
+    serviceRef.get().request(current);
+   }
+   return sampled;
+  },(bytes,w,h)->new Asset(bytes),revisions::incrementAndGet,s->{},clock::get)){
+   serviceRef.set(service);
+   service.poll();
+   check(revisions.get()==1,"obsolete poll must not overwrite a newer UI song request");
+   service.poll();
+   check(service.isResolved(current)&&get(service,current)!=null,"new song resolves immediately at the next poll");
+  }
+  System.out.println("PASS stale poll sample cannot overwrite newer UI song request");
+ }
  public static void main(String[] args)throws Exception{
   Path root=Files.createTempDirectory("reborn-local-cd-test"),one=Files.createDirectories(root.resolve("专辑一")),two=Files.createDirectories(root.resolve("album-two"));
   Path track=Files.write(one.resolve("曲目.flac"),new byte[]{1}),track2=Files.write(two.resolve("track.flac"),new byte[]{1});
@@ -39,6 +61,7 @@ public class LocalDiscServiceTest {
   Files.write(two.resolve("cd.png"),png(0xffffff00));fresh(service);Asset yellow=get(service,song.get());check(yellow.png.getRGB(32,12)==0xffffff00,"new folder loads independently");
   song.set(track2.toUri().toString());fresh(service);check(get(service,song.get())!=null,"file URI supported");
   song.set("https://example.invalid/song.flac");fresh(service);check(get(service,song.get())==null,"online source does not borrow a local CD");
+  checkPollCannotRewindRequest(track.toString(),track2.toString());
   service.close();for(Asset a:decoded)check(a.closed==1,"each retired asset closed exactly once");
   byte[] bomb=png(0xff000000);bomb[16]=0x7f;bomb[17]=(byte)0xff;bomb[18]=(byte)0xff;bomb[19]=(byte)0xff;
   try{LocalDiscService.dimensions(bomb);throw new AssertionError("oversized PNG accepted");}catch(IOException expected){}

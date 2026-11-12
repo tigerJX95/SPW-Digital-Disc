@@ -4,10 +4,11 @@
 
 Adds a digital CD presentation to Salt Player (SPW), with a complete album cover and a CD extending from its right side.
 
-Current version: **v1.6.0**
+Current version: **v1.7.0**
 
-- **Custom disc artwork lookup order**: lets you change the lookup order of `cd.png`, `cd.jpg`, `disc.png` and `disc.jpg`.
-- **Current disc artwork source**: the order dialog shows the matched file or fallback source and refreshes when the track changes.
+- Fixes a race where a background disc artwork lookup could overwrite the latest track request during rapid track changes.
+- Refreshes the display when the last usable custom disc image is deleted during playback, and switches to a replacement image once it is ready.
+- Fixes an abrupt return when the cover has finished enlarging and the disc has yet to slide out.
 
 [Update history](CHANGELOG.md) (Chinese)
 
@@ -42,7 +43,7 @@ https://github.com/user-attachments/assets/8a289172-d79b-4e2e-9ba2-c7dc9ee5d86c
 
 ## Installation and use
 
-The steps below install **V1.6.0**. Interface mappings cover SPW 1.19.0 and 1.19.3 from the Microsoft Store. See [Verified SPW host versions](#verified-spw-host-versions) for Steam test results on Windows and Ubuntu 26.04.1 LTS (Linux). The plugin uses SPW's internal drawing interfaces, so later SPW versions may require compatibility updates.
+The steps below install **V1.7.0**. Interface mappings cover SPW 1.19.0 and 1.19.3 from the Microsoft Store. See [Verified SPW host versions](#verified-spw-host-versions) for Steam test results on Windows and Ubuntu 26.04.1 LTS (Linux). The plugin uses SPW's internal drawing interfaces, so later SPW versions may require compatibility updates.
 
 1. Obtain the compiled `.spmod` file. The source ZIP cannot be installed directly; see the build instructions below to compile it yourself.
 2. In SPW's plugin manager, use the local plugin import option to select the `.spmod` file.
@@ -203,7 +204,7 @@ If using PowerShell, configure the same environment variables and run this in th
 After the build reports `BUILD SUCCESSFUL`, look in the source directory's `dist` folder for:
 
 ```text
-SPW_Digital_Disc_v1.6.0.spmod
+SPW_Digital_Disc_v1.7.0.spmod
 ```
 
 This is the installation package that SPW can import. You do not need to ZIP the entire source directory or rename its extension. The `build` directory contains intermediate build output, not the installation package.

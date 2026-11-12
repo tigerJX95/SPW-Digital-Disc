@@ -112,11 +112,17 @@ final class LocalDiscService<T extends AutoCloseable> implements AutoCloseable {
   }
  }
  void poll(){
-  if(closed)return;
+  long observedGeneration;
+  synchronized(lock){
+   if(closed)return;
+   observedGeneration=generation;
+  }
   String current=song.get();long now=clock.getAsLong(),ticket;
-  request(current);
   List<String> candidates;
   synchronized(lock){
+   // A UI request made during the host read supersedes this poll sample.
+   if(closed||observedGeneration!=generation)return;
+   request(current);
    if(now<nextScan)return;nextScan=now+TimeUnit.SECONDS.toNanos(1);ticket=generation;candidates=names;
   }
   Path directory=directory(current);
@@ -131,7 +137,7 @@ final class LocalDiscService<T extends AutoCloseable> implements AutoCloseable {
     if(!Files.isRegularFile(file,NOFOLLOW_LINKS)){
      synchronized(lock){
       if(closed||ticket!=generation)return;
-      evictPathLocked(file,null);
+      evictPathLocked(file,null,true);
      }
      continue;
     }
@@ -139,7 +145,7 @@ final class LocalDiscService<T extends AutoCloseable> implements AutoCloseable {
     Cached<T> cached;
     synchronized(lock){
      if(closed||ticket!=generation||!Objects.equals(current,requestedSong)||!Objects.equals(current,song.get()))return;
-     evictPathLocked(file,stamp);
+     evictPathLocked(file,stamp,true);
      Rejected failed=rejected.get(file);
      // Recheck metadata on every scan. A replacement bypasses the cooldown;
      // unchanged failures are retried later so transient decoder errors recover.
@@ -148,7 +154,7 @@ final class LocalDiscService<T extends AutoCloseable> implements AutoCloseable {
      if(Objects.equals(current,publishedSong)&&stamp.equals(publishedStamp)&&asset!=null)return;
      cached=cache.get(stamp);
      if(cached!=null){
-      clearLocked();asset=cached.value();
+      retirePublicationLocked();asset=cached.value();
       publishedSong=current;publishedStamp=stamp;resolvedSong=current;resolved=true;changed.run();
      }
     }
@@ -220,7 +226,7 @@ final class LocalDiscService<T extends AutoCloseable> implements AutoCloseable {
   synchronized(lock){
    if(closed||ticket!=generation||!Objects.equals(current,requestedSong)||!Objects.equals(current,song.get()))return;
    boolean notify=!resolved||!Objects.equals(current,resolvedSong)||asset!=null;
-   clearLocked();resolvedSong=current;resolved=true;if(notify)changed.run();
+   retirePublicationLocked();resolvedSong=current;resolved=true;if(notify)changed.run();
   }
  }
  // false means lookup completed without usable artwork; true means local image
@@ -250,7 +256,7 @@ final class LocalDiscService<T extends AutoCloseable> implements AutoCloseable {
   }
  }
  void discard(String currentSong){
-  synchronized(lock){if(Objects.equals(currentSong,publishedSong)){Path path=publishedStamp.path();evictPathLocked(path,null);changed.run();}}
+  synchronized(lock){if(publishedStamp!=null&&Objects.equals(currentSong,publishedSong)){retirePublicationLocked();changed.run();}}
   diagnostic("LOCAL_CD_DEFAULT image draw failed");
  }
  private void clearLocked(){asset=null;publishedSong=null;publishedStamp=null;}
@@ -259,10 +265,15 @@ final class LocalDiscService<T extends AutoCloseable> implements AutoCloseable {
   if(asset==entry.value())clearLocked();
   closeAsset(entry.value());
  }
- private void evictPathLocked(Path path,Stamp keep){
+ private void retirePublicationLocked(){
+  if(publishedStamp!=null)evictPathLocked(publishedStamp.path(),null,false);
+ }
+ private void evictPathLocked(Path path,Stamp keep,boolean keepPublished){
   for(var it=cache.entrySet().iterator();it.hasNext();){
    var entry=it.next();
-   if(entry.getKey().path().equals(path)&&!entry.getKey().equals(keep))removeLocked(it,entry.getValue());
+   // Keep the current image drawable until the scan can publish its replacement or fallback.
+   if(entry.getKey().path().equals(path)&&!entry.getKey().equals(keep)
+     &&(!keepPublished||entry.getValue().value()!=asset))removeLocked(it,entry.getValue());
   }
  }
  private void clearCacheLocked(){
