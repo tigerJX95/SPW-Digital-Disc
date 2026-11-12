@@ -1,5 +1,5 @@
-name: 🐛 问题反馈 · Steam / Bug Report · Steam
-description: 反馈 Steam 版插件问题，请选择 Windows 或 Linux。 / Report a bug on Steam. Choose Windows or Linux.
+name: 问题反馈 / Bug Report
+description: 反馈椒盐播放器数字化碟片插件的问题。 / Report a bug in SPW Digital Disc.
 title: "[程序错误] "
 labels: ["bug"]
 assignees: ["tigerJX95"]
@@ -7,23 +7,26 @@ type: Bug
 
 body:
   - type: dropdown
-    id: steam-platform
+    id: affected-platform
     attributes:
-      label: 💻 Steam 运行系统 / Steam Operating System
+      label: 💻 受影响的平台与渠道 / Affected Platform and Channel
       description: |
-        请选择问题发生时 Steam 版椒盐播放器所运行的系统。
+        请选择已确认受影响的环境。三个渠道均可复现时，选择最后一项。
 
-        Choose the operating system where the issue occurred in the Steam edition of Salt Player.
+        Select an environment where you reproduced the issue. Select the last option if it affects all three.
+      multiple: false
       options:
-        - Windows
-        - Linux
+        - Windows · 微软商店 / Windows · Microsoft Store
+        - Windows · Steam
+        - Linux · Steam
+        - 三个渠道均受影响 / All three channels
     validations:
       required: true
 
   - type: input
-    id: steam-player-version
+    id: player-version
     attributes:
-      label: 🎵 Steam 版播放器版本 / Steam Player Version
+      label: 🎵 播放器版本 / Player Version
       description: |
         请填写椒盐播放器的版本，可在播放器的关于页面查看。
 

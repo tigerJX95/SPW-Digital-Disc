@@ -23,38 +23,40 @@ jobs:
             const answer = firstField[2].trim();
             if (!answer || answer.startsWith('### ')) return;
 
-            const steamLabels = new Map([
-              ['Windows', { name: 'steam windows', color: '1d76db' }],
-              ['Linux', { name: 'steam linux', color: '0e8a16' }],
-            ]);
+            if (heading !== '💻 受影响的平台与渠道 / Affected Platform and Channel') return;
 
-            let label;
-            if (heading === '🎵 微软商店版播放器版本 / Microsoft Store Player Version') {
-              label = { name: 'Microsoft Store', color: '0366d6' };
-            } else if (heading === '💻 Steam 运行系统 / Steam Operating System') {
-              label = steamLabels.get(answer);
-            }
-            if (!label) return;
+            const microsoftStore = { name: 'Microsoft Store', color: '0366d6' };
+            const steamWindows = { name: 'steam windows', color: '1d76db' };
+            const steamLinux = { name: 'steam linux', color: '0e8a16' };
+            const labelsByAnswer = new Map([
+              ['Windows · 微软商店 / Windows · Microsoft Store', [microsoftStore]],
+              ['Windows · Steam', [steamWindows]],
+              ['Linux · Steam', [steamLinux]],
+              ['三个渠道均受影响 / All three channels', [microsoftStore, steamWindows, steamLinux]],
+            ]);
+            const labels = labelsByAnswer.get(answer);
+            if (!labels) return;
 
             const repository = context.repo;
             const issues = github.rest.issues;
-            const lookup = { ...repository, name: label.name };
-
-            // 首次使用某个渠道时创建标签。并行提交可能已经创建了同名标签。
-            try {
-              await issues.getLabel(lookup);
-            } catch (error) {
-              if (error.status !== 404) throw error;
+            for (const label of labels) {
+              const lookup = { ...repository, name: label.name };
+              // 首次使用时创建标签。并行提交可能已创建同名标签。
               try {
-                await issues.createLabel({ ...repository, ...label });
-              } catch (creationError) {
-                if (creationError.status !== 422) throw creationError;
                 await issues.getLabel(lookup);
+              } catch (error) {
+                if (error.status !== 404) throw error;
+                try {
+                  await issues.createLabel({ ...repository, ...label });
+                } catch (creationError) {
+                  if (creationError.status !== 422) throw creationError;
+                  await issues.getLabel(lookup);
+                }
               }
             }
 
             await issues.addLabels({
               ...repository,
               issue_number: context.issue.number,
-              labels: [label.name],
+              labels: labels.map(label => label.name),
             });
