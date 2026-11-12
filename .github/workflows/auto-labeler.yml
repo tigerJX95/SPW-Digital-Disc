@@ -25,9 +25,9 @@ jobs:
 
             if (heading !== '💻 受影响的平台与渠道 / Affected Platform and Channel') return;
 
-            const microsoftStore = { name: 'Microsoft Store', color: '0366d6' };
-            const steamWindows = { name: 'steam windows', color: '1d76db' };
-            const steamLinux = { name: 'steam linux', color: '0e8a16' };
+            const microsoftStore = { name: 'Windows · Microsoft Store', color: '0366d6' };
+            const steamWindows = { name: 'Windows · Steam', color: '1d76db' };
+            const steamLinux = { name: 'Linux · Steam', color: '0e8a16' };
             const labelsByAnswer = new Map([
               ['Windows · 微软商店 / Windows · Microsoft Store', [microsoftStore]],
               ['Windows · Steam', [steamWindows]],
