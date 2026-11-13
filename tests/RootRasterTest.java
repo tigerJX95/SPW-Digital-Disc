@@ -93,7 +93,7 @@ public class RootRasterTest {
      case "drawPath-GBMwjPU"->{
       var outline=outlines.get(a[0]);
       if(outline==null||!(a[1] instanceof androidx.compose.ui.graphics.SweepGradient brush)||!(a[3] instanceof androidx.compose.ui.graphics.drawscope.Stroke stroke))
-       throw new AssertionError("expected vinyl grooves with sweep shading");
+       throw new AssertionError("expected vinyl path with sweep shading");
       sweep(brush,new BasicStroke(stroke.getWidth()).createStrokedShape(outline));return null;
      }
      case "drawCircle-V9BoPsw"->{
@@ -143,7 +143,7 @@ public class RootRasterTest {
    var colors=brush.getColors$ui_graphics();
    var unbox=androidx.compose.ui.graphics.Color.class.getMethod("unbox-impl");
    int[] palette=new int[colors.size()];
-   for(int i=0;i<palette.length;i++)palette[i]=(Integer)toArgb.invoke(null,unbox.invoke(colors.get(i)))&255;
+   for(int i=0;i<palette.length;i++)palette[i]=(Integer)toArgb.invoke(null,unbox.invoke(colors.get(i)));
    var layer=(Graphics2D)graphics.create();
    try{
     layer.clip(shape);
@@ -153,9 +153,13 @@ public class RootRasterTest {
      float fraction=(degree+1)/360f;
      while(stops.get(stop+1)<fraction)stop++;
      float t=(fraction-stops.get(stop))/(stops.get(stop+1)-stops.get(stop));
-     int shade=Math.round(palette[stop]+t*(palette[stop+1]-palette[stop]));
-     layer.setColor(new Color(shade,shade,shade));
-     layer.fill(new Arc2D.Double(-r,-r,2*r,2*r,-degree,-2.1,Arc2D.PIE));
+     int argb=0;
+     for(int shift=0;shift<=24;shift+=8){
+      int from=palette[stop]>>>shift&255,to=palette[stop+1]>>>shift&255;
+      argb|=Math.round(from+t*(to-from))<<shift;
+     }
+     layer.setColor(new Color(argb,true));
+     layer.fill(new Arc2D.Double(-r,-r,2*r,2*r,-degree,-2,Arc2D.PIE));
     }
    }finally{layer.dispose();}
   }

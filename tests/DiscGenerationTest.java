@@ -13,16 +13,25 @@ public class DiscGenerationTest {
   AtomicReference<LocalDiscServiceTest.Asset> old=new AtomicReference<>();
   CountDownLatch entered=new CountDownLatch(1),release=new CountDownLatch(1);
   AtomicInteger count=new AtomicInteger();
+  AtomicLong clock=new AtomicLong(1);
   var service=new LocalDiscService<LocalDiscServiceTest.Asset>(song::get,(bytes,w,h)->{
    var asset=new LocalDiscServiceTest.Asset(bytes);
    if(count.incrementAndGet()==1){old.set(asset);entered.countDown();if(!release.await(5,TimeUnit.SECONDS))throw new AssertionError("release timeout");}
    return asset;
-  },()->{},s->{});
+  },()->{},s->{},clock::get);
   Thread worker=new Thread(service::poll);worker.start();
   if(!entered.await(5,TimeUnit.SECONDS))throw new AssertionError("worker did not enter");
-  song.set(b);service.request(b);song.set(a);service.request(a);release.countDown();worker.join(5000);
+  song.set(b);service.request(b);
+  clock.addAndGet(LocalDiscService.LOOKUP_WAIT_NANOS-1);
+  service.resolveSlowLookup(b);
+  if(service.isResolved(b))throw new AssertionError("fallback before deadline");
+  clock.incrementAndGet();service.resolveSlowLookup(b);
+  if(!service.isResolved(b)||service.drawResolved(b,asset->{throw new AssertionError("stale artwork");}))
+   throw new AssertionError("default disk unavailable while worker is blocked");
+  song.set(a);service.request(a);service.resolveSlowLookup(a);
+  release.countDown();worker.join(5000);
   if(worker.isAlive()||old.get().closed!=1||service.isResolved(a)||LocalDiscServiceTest.get(service,a)!=null)throw new AssertionError("old A result escaped generation gate");
   service.poll();if(!service.isResolved(a)||LocalDiscServiceTest.get(service,a)==null)throw new AssertionError("latest A never resolves");
-  service.close();System.out.println("PASS blocked A decode, UI A-B-A requests, stale A disposed exactly once, no publication before latest A resolves");
+  service.close();System.out.println("PASS timed default while worker is blocked, blocked A decode, UI A-B-A requests, stale A disposed exactly once, no publication before latest A resolves");
  }
 }

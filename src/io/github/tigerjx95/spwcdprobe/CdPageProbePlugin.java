@@ -280,7 +280,7 @@ public final class CdPageProbePlugin extends SpwPlugin {
    // layout nodes must not be traversed by the local-image decode worker.
    sourceObserver=new javax.swing.Timer(100,event->observeSources());sourceObserver.start();
    animationClock=new javax.swing.Timer(16,event->animateFrames());animationClock.setCoalesce(true);animationClock.start();
-   report("START 1.7.0 Host Binding; retained pixels are not readiness; hooks="+handles.size());
+   report("START 1.8.0 Host Binding; retained pixels are not readiness; hooks="+handles.size());
   }catch(Throwable e){stop();throw new IllegalStateException("SelfDraw startup failed",e);}
  }
  @SuppressWarnings("unchecked")
@@ -396,14 +396,14 @@ public final class CdPageProbePlugin extends SpwPlugin {
         canvas.translate(-pivot,-plan.side()*.5f);
         DiscImage cover=selected.cover();
         float exposed=selected.exposed();
-        if(cover!=null)RootRenderer.paint(scope,cover.aspect(),cover::drawCover,disc,androidx.compose.ui.graphics.SkiaBackedPath_skikoKt::Path,exposed,amount,front,frame.frontDiscLayer,angle,display.vinyl());
-        else RootRenderer.draw(scope,painter,()->rawSource.set(true),()->rawSource.remove(),disc,exposed,amount,front,frame.frontDiscLayer,angle,frame.fallbackActive,display.vinyl());
+        if(cover!=null)RootRenderer.paint(scope,cover.aspect(),cover::drawCover,disc,androidx.compose.ui.graphics.SkiaBackedPath_skikoKt::Path,exposed,amount,front,frame.frontDiscLayer,angle,display.vinyl(),display.vinylColor());
+        else RootRenderer.draw(scope,painter,()->rawSource.set(true),()->rawSource.remove(),disc,exposed,amount,front,frame.frontDiscLayer,angle,frame.fallbackActive,display.vinyl(),display.vinylColor());
         float gap=4*density.getDensity(),reflectedHeight=plan.height()-plan.side()-gap;
         if(reflectedHeight>0){
          if(frame.reflection==null)frame.reflection=new ReflectionRenderer();
          try{frame.reflection.draw(scope,plan.side(),plan.width(),reflectedHeight,gap,()->{
-          if(cover!=null)RootRenderer.paint(scope,cover.aspect(),cover::drawCover,disc,androidx.compose.ui.graphics.SkiaBackedPath_skikoKt::Path,exposed,amount,front,frame.frontDiscLayer,angle,display.vinyl());
-          else RootRenderer.draw(scope,painter,()->rawSource.set(true),()->rawSource.remove(),disc,exposed,amount,front,frame.frontDiscLayer,angle,frame.fallbackActive,display.vinyl());
+          if(cover!=null)RootRenderer.paint(scope,cover.aspect(),cover::drawCover,disc,androidx.compose.ui.graphics.SkiaBackedPath_skikoKt::Path,exposed,amount,front,frame.frontDiscLayer,angle,display.vinyl(),display.vinylColor());
+          else RootRenderer.draw(scope,painter,()->rawSource.set(true),()->rawSource.remove(),disc,exposed,amount,front,frame.frontDiscLayer,angle,frame.fallbackActive,display.vinyl(),display.vinylColor());
          });}
          catch(Exception error){report("REFLECTION_ERROR "+error.getClass().getSimpleName());}
         }
@@ -434,9 +434,10 @@ public final class CdPageProbePlugin extends SpwPlugin {
    var artwork=service.artworkStatus(song);
    if(!artwork.resolved())return "正在查找盘面图片…";
    if(artwork.fileName()!=null)return "使用自定义图片 "+artwork.fileName();
-   boolean vinyl=displaySettings.getValue().vinyl();
-   if(coverAvailability.missing(song))return vinyl?"无可用图片，显示空白黑胶":"无可用图片，显示空白 CD";
-   if(coverAvailability.available(song))return vinyl?"由专辑封面生成（黑胶样式）":"由专辑封面生成（CD 样式）";
+   var display=displaySettings.getValue();
+   String style=!display.vinyl()?"CD":display.vinylColor()==DiscSettings.VinylColor.BLACK?"黑胶":display.vinylColor().label+"彩胶";
+   if(coverAvailability.missing(song))return "无可用图片，显示空白 "+style;
+   if(coverAvailability.available(song))return "由专辑封面生成（"+style+" 样式）";
    return "未找到可用自定义图片，等待专辑封面";
   }catch(RuntimeException unavailable){return "盘面来源暂不可用";}
  }
@@ -462,7 +463,7 @@ public final class CdPageProbePlugin extends SpwPlugin {
   if(!running)return;
   long now=System.nanoTime();
   String song;try{song=currentSong();}catch(Exception unavailable){return;}
-  if(localDiscs!=null)localDiscs.request(song);
+  if(localDiscs!=null){localDiscs.request(song);localDiscs.resolveSlowLookup(song);}
   boolean sourceChanged=false;
   var display=displaySettings.getValue();
   boolean rotate=display.rotate();

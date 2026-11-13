@@ -18,7 +18,7 @@ final class RootRenderer {
  private static final Constructor<Stroke> STROKE;
  private record Finish(float radius,Stroke line,Stroke edge,Brush hub,Brush metal,Brush innerLip,Stroke bevel,Stroke lip){}
  private static volatile Finish cachedFinish;
- private record VinylFinish(float radius,Path grooves,Path label,Path hole,Path spindleInset,Stroke grooveStroke,Stroke rim,Brush surface,Brush groovesLight,Brush falloff){}
+ private record VinylFinish(float radius,DiscSettings.VinylColor color,Path grooves,Path label,Path hole,Path spindleInset,Stroke grooveStroke,Stroke rim,Brush surface,Brush groovesLight,Brush falloff){}
  private static volatile VinylFinish cachedVinyl;
  private static final Method BRUSH_PATH,SWEEP;
 
@@ -61,13 +61,16 @@ final class RootRenderer {
   draw(scope,painter,enter,leave,disc,exposure,amount,front,layer,angle,blank,false);
  }
  static void draw(DrawScope scope,Object painter,Runnable enter,Runnable leave,Disc disc,float exposure,int amount,boolean front,FrontDiscLayer layer,float angle,boolean blank,boolean vinyl)throws Exception{
+  draw(scope,painter,enter,leave,disc,exposure,amount,front,layer,angle,blank,vinyl,DiscSettings.VinylColor.BLACK);
+ }
+ static void draw(DrawScope scope,Object painter,Runnable enter,Runnable leave,Disc disc,float exposure,int amount,boolean front,FrontDiscLayer layer,float angle,boolean blank,boolean vinyl,DiscSettings.VinylColor color)throws Exception{
   long intrinsic=(Long)INTRINSIC.invoke(painter);float iw=x(intrinsic),ih=y(intrinsic);
   if(!Float.isFinite(iw)||!Float.isFinite(ih)||iw<=0||ih<=0){iw=ih=1;}
   final float ratio=iw/ih;
   paint(scope,ratio,new Source(){
    public void draw(DrawScope s,float w,float h)throws Exception{enter.run();try{DRAW.invoke(painter,s,pack(w,h),1f,null);}finally{leave.run();}}
    public boolean blankDisc(){return blank;}
-  },disc,SkiaBackedPath_skikoKt::Path,exposure,amount,front,layer,angle,vinyl);
+  },disc,SkiaBackedPath_skikoKt::Path,exposure,amount,front,layer,angle,vinyl,color);
  }
  static void paint(DrawScope scope,float aspect,Source source)throws Exception{paint(scope,aspect,source,(s,x,y,d)->false);}
  static void paint(DrawScope scope,float aspect,Source source,Disc disc)throws Exception{
@@ -92,6 +95,9 @@ final class RootRenderer {
   paint(scope,aspect,source,disc,paths,exposure,amount,front,layer,angle,false);
  }
  static void paint(DrawScope scope,float aspect,Source source,Disc disc,Supplier<Path> paths,float exposure,int amount,boolean front,FrontDiscLayer layer,float angle,boolean vinyl)throws Exception{
+  paint(scope,aspect,source,disc,paths,exposure,amount,front,layer,angle,vinyl,DiscSettings.VinylColor.BLACK);
+ }
+ static void paint(DrawScope scope,float aspect,Source source,Disc disc,Supplier<Path> paths,float exposure,int amount,boolean front,FrontDiscLayer layer,float angle,boolean vinyl,DiscSettings.VinylColor color)throws Exception{
   exposure=Math.max(0,Math.min(1,exposure));
   long size=(Long)SIZE.invoke(scope);float w=x(size),h=y(size),side=Math.min(h,w/DiscExposure.widthFactor(amount));
   if(side<=0||!Float.isFinite(side))return;
@@ -109,7 +115,7 @@ final class RootRenderer {
    try{
     if(angle!=0f){moving.translate(cx,cy);moving.rotate(angle);moving.translate(-cx,-cy);}
   if(!disc.draw(scope,cx,cy,r*2f)){
-   if(vinyl)vinylFace(scope,source,aspect,cx,cy,r,paths,angle);
+   if(vinyl)vinylFace(scope,source,aspect,cx,cy,r,paths,angle,color);
    else{
    Canvas canvas=scope.getDrawContext().getCanvas();canvas.save();
    try{
@@ -139,33 +145,68 @@ final class RootRenderer {
   path.addOval(new Rect(-radius,-radius,radius,radius),Path.Direction.Clockwise);
   return path;
  }
- private static VinylFinish vinylFinish(float radius,Supplier<Path> paths)throws Exception{
+ private static VinylFinish vinylFinish(float radius,Supplier<Path> paths,DiscSettings.VinylColor color)throws Exception{
   VinylFinish finish=cachedVinyl;
-  if(finish!=null&&finish.radius()==radius)return finish;
+  if(finish!=null&&finish.radius()==radius&&finish.color()==color)return finish;
+  boolean colored=color!=DiscSettings.VinylColor.BLACK;
   Path grooves=paths.get();
-  for(int ring=0;ring<42;ring++){
-   float r=radius*(.395f+ring*.0141f);
-   grooves.addOval(new Rect(-r,-r,r,r),Path.Direction.Clockwise);
+  if(colored){
+   // Wider gaps separate bands of closely spaced grooves from the smooth runout.
+   float[] starts={.480f,.575f,.691f,.818f,.913f};
+   float[] spacing={.011f,.012f,.013f,.010f,.011f};
+   int[] counts={8,8,8,8,6};
+   for(int band=0;band<starts.length;band++){
+    for(int ring=0;ring<counts[band];ring++){
+     float r=radius*(starts[band]+ring*spacing[band]);
+     grooves.addOval(new Rect(-r,-r,r,r),Path.Direction.Clockwise);
+    }
+   }
+  }else{
+   for(int ring=0;ring<42;ring++){
+    float r=radius*(.395f+ring*.0141f);
+    grooves.addOval(new Rect(-r,-r,r,r),Path.Direction.Clockwise);
+   }
   }
-  // Broad reflections above and below the hub, separated by near-black flanks.
   float[] angles={0,1/12f,1/6f,1/4f,1/3f,5/12f,.5f,7/12f,2/3f,.75f,5/6f,11/12f,1};
-  Brush surface=(Brush)SWEEP.invoke(Brush.Companion,grayStops(angles,new int[]{12,21,40,63,40,21,11,19,37,60,38,21,12}),pack(0,0));
-  Brush groovesLight=(Brush)SWEEP.invoke(Brush.Companion,grayStops(angles,new int[]{18,28,52,85,52,28,17,25,49,81,50,28,18}),pack(0,0));
-  float[] stops={0,.38f,.54f,.71f,.87f,.98f,1};
-  int[] colors={0x00000000,0x00000000,0x00000000,0x12000000,0x27000000,0x45000000,0x45000000};
+  Brush surface=(Brush)SWEEP.invoke(Brush.Companion,vinylStops(color,angles,
+      colored?new int[]{72,79,83,80,77,73,70,78,85,83,79,75,72}
+             :new int[]{12,21,40,63,40,21,11,19,37,60,38,21,12},colored?0x60:0xff,false),pack(0,0));
+  float[] glints={0,.06f,.12f,.17f,.24f,.52f,.57f,.62f,.67f,.74f,1};
+  Brush groovesLight=(Brush)SWEEP.invoke(Brush.Companion,
+      colored?vinylStops(color,glints,new int[]{13,19,39,26,15,13,23,47,32,15,13},0x74,true)
+             :vinylStops(color,angles,new int[]{18,28,52,85,52,28,17,25,49,81,50,28,18},0xff,false),pack(0,0));
+  float[] stops=colored?new float[]{0,.375f,.42f,.45f,.47f,.65f,.89f,.97f,1}
+                       :new float[]{0,.38f,.54f,.71f,.87f,.98f,1};
+  // Match perceptual lightness and chroma across the six translucent runout tints.
+  int runout=switch(color){
+   case BLUE -> 0x35bfe5;
+   case GREEN -> 0x60c68f;
+   case AMBER -> 0xd7a447;
+   case PURPLE -> 0xc398ec;
+   case PINK -> 0xea8cb6;
+   case RED -> 0xf38c8d;
+   case BLACK -> 0;
+  };
+  int ringStart=0x7c000000|runout;
+  int[] colors=colored?new int[]{ringStart,ringStart,0x76000000|runout,
+                                 0x33000000|runout,0x03000000|runout,0x0a000000,0x00000000,0x12000000,0x21000000}
+                      :new int[]{0x00000000,0x00000000,0x00000000,0x12000000,0x27000000,0x45000000,0x45000000};
   kotlin.Pair<?,?>[] shading=new kotlin.Pair<?,?>[stops.length];
   for(int i=0;i<stops.length;i++)shading[i]=new kotlin.Pair<>(stops[i],BOX_COLOR.invoke(null,ColorKt.Color(colors[i])));
   Brush falloff=(Brush)RADIAL.invoke(Brush.Companion,shading,pack(0,0),radius,0);
-  return cachedVinyl=new VinylFinish(radius,grooves,oval(paths,radius*.375f),oval(paths,radius*.029f),oval(paths,radius*.038f),
-      stroke(radius*.0065f),stroke(radius*.018f),surface,groovesLight,falloff);
+  return cachedVinyl=new VinylFinish(radius,color,grooves,oval(paths,radius*.375f),oval(paths,radius*.029f),oval(paths,radius*.038f),
+      stroke(radius*(colored?.0037f:.0065f)),stroke(radius*.018f),surface,groovesLight,falloff);
  }
- private static kotlin.Pair<?,?>[] grayStops(float[] stops,int[] levels)throws Exception{
+ private static kotlin.Pair<?,?>[] vinylStops(DiscSettings.VinylColor color,float[] stops,int[] levels,int alpha,boolean glints)throws Exception{
   kotlin.Pair<?,?>[] values=new kotlin.Pair<?,?>[stops.length];
-  for(int i=0;i<stops.length;i++)values[i]=new kotlin.Pair<>(stops[i],BOX_COLOR.invoke(null,ColorKt.Color(0xff000000|levels[i]*0x010101)));
+  for(int i=0;i<stops.length;i++){
+   int argb=glints?((levels[i]*alpha/85)<<24)|0x00ffffff:(alpha<<24)|(color.shade(levels[i])&0x00ffffff);
+   values[i]=new kotlin.Pair<>(stops[i],BOX_COLOR.invoke(null,ColorKt.Color(argb)));
+  }
   return values;
  }
- private static void vinylFace(DrawScope scope,Source source,float aspect,float cx,float cy,float radius,Supplier<Path> paths,float angle)throws Exception{
-  VinylFinish finish=vinylFinish(radius,paths);
+ private static void vinylFace(DrawScope scope,Source source,float aspect,float cx,float cy,float radius,Supplier<Path> paths,float angle,DiscSettings.VinylColor color)throws Exception{
+  VinylFinish finish=vinylFinish(radius,paths,color);
   Canvas canvas=scope.getDrawContext().getCanvas();canvas.save();
   try{
    canvas.translate(cx,cy);
@@ -179,9 +220,13 @@ final class RootRenderer {
     BRUSH_PATH.invoke(scope,finish.grooves(),finish.groovesLight(),1f,finish.grooveStroke(),null,3);
     BRUSH_CIRCLE.invoke(scope,finish.falloff(),radius,center,1f,Fill.INSTANCE,null,3);
    }finally{canvas.restore();}
-   circle(scope,0xff363636,radius-finish.rim().getWidth()*.5f,center,finish.rim());
-   CIRCLE.invoke(scope,ColorKt.Color(0xff101010),radius*.386f,center,1f,Fill.INSTANCE,null,3);
-   CIRCLE.invoke(scope,ColorKt.Color(0xff252525),radius*.375f,center,1f,Fill.INSTANCE,null,3);
+   boolean classic=color==DiscSettings.VinylColor.BLACK;
+   int rimColor=classic?color.shade(54):0xa0000000|(color.shade(70)&0xffffff);
+   circle(scope,rimColor,radius-finish.rim().getWidth()*.5f,center,finish.rim());
+   if(classic){
+    CIRCLE.invoke(scope,ColorKt.Color(0xff101010),radius*.386f,center,1f,Fill.INSTANCE,null,3);
+    CIRCLE.invoke(scope,ColorKt.Color(0xff252525),radius*.375f,center,1f,Fill.INSTANCE,null,3);
+   }
    if(!source.blankDisc()){
     canvas.save();
     try{

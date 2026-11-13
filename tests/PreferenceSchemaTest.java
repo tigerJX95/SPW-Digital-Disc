@@ -8,7 +8,7 @@ public class PreferenceSchemaTest {
   var parser=Class.forName(TestHost.parser()).getMethod("\u037f",String.class);
   var groups=(List<?>)parser.invoke(null,Files.readString(Path.of("preference_config.json")));
   check(groups.size()==1,"one native settings group");Object group=groups.get(0);
-  var items=(List<?>)group.getClass().getMethod("ԩ").invoke(group);check(items.size()==7,"exposure slider, three switches, two speed lists and order button");
+  var items=(List<?>)group.getClass().getMethod("ԩ").invoke(group);check(items.size()==7,"exposure slider, two switches, two buttons and two speed lists");
   Object slider=items.get(0);var type=slider.getClass();check(type.getName().equals(TestHost.model()+"$Ԫ"),"host recognizes actual seekbar model");
   check(type.getMethod("\u037f").invoke(slider).equals(DiscExposure.KEY),"schema and runtime use same key");
   check(type.getMethod("Ԭ").invoke(slider).equals("config.json"),"schema and runtime use same file");
@@ -21,9 +21,10 @@ public class PreferenceSchemaTest {
   Object rotation=items.get(2);var rt=rotation.getClass();
   check(rt.getMethod("\u037f").invoke(rotation).equals(DiscSettings.ROTATE_KEY),"rotation key");
   check(!(Boolean)rt.getMethod("Ԫ").invoke(rotation),"rotation defaults off");
-  Object vinyl=items.get(3);var vt=vinyl.getClass();
-  check(vt.getMethod("\u037f").invoke(vinyl).equals(DiscSettings.VINYL_KEY),"vinyl key");
-  check(!(Boolean)vt.getMethod("Ԫ").invoke(vinyl),"vinyl defaults off");
+  Object appearance=items.get(3);var appearanceType=appearance.getClass();
+  check(appearanceType.getName().equals(TestHost.model()+"$Ϳ"),"native appearance button model");
+  check(appearanceType.getMethod("Ԫ").invoke(appearance).equals(DiscAppearanceDialog.class.getName()+".open"),"appearance callback");
+  DiscAppearanceDialog.open();
   for(int i=4;i<6;i++){
    Object speed=items.get(i);var list=speed.getClass();
    check(list.getName().equals(TestHost.model()+"$ԩ"),"native list model");
@@ -39,6 +40,6 @@ public class PreferenceSchemaTest {
   var method=DiscOrderDialog.class.getMethod("open");
   check(java.lang.reflect.Modifier.isStatic(method.getModifiers()),"callback is public and static");
   method.invoke(null); // Host may open settings even while the plugin is stopped.
-  System.out.println("PASS actual SPW preference_config.json parser: seekbar, three switches, two speed lists and order button, matching keys/file, 0-100 bounds/default50 and all switches default off");
+  System.out.println("PASS actual SPW preference_config.json parser: seekbar, two switches, two buttons and two speed lists, matching keys/file, 0-100 bounds/default50 and all switches default off");
  }
 }

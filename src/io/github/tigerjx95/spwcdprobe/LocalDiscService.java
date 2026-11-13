@@ -1,5 +1,8 @@
 package io.github.tigerjx95.spwcdprobe;
 import java.nio.file.*;
+import java.nio.file.attribute.BasicFileAttributes;
+import java.nio.file.attribute.BasicFileAttributeView;
+import java.nio.channels.Channels;
 import java.net.URI;
 import java.io.*;
 import java.util.*;
@@ -26,11 +29,12 @@ final class LocalDiscService<T extends AutoCloseable> implements AutoCloseable {
  static final long MAX_PIXELS=16L*1024*1024;
  interface Decoder<T>{T decode(byte[] bytes,int width,int height)throws Exception;}
  interface Draw<T>{void draw(T asset)throws Exception;}
+ static final long LOOKUP_WAIT_NANOS=TimeUnit.SECONDS.toNanos(2);
  static final long REJECT_RETRY_NANOS=TimeUnit.SECONDS.toNanos(5);
  private record Rejected(Stamp stamp,long retryAt){}
  private final Map<Path,Rejected> rejected=new LinkedHashMap<>();
  private final LongSupplier clock;
- private record Stamp(Path path,long size,java.nio.file.attribute.FileTime modified,java.nio.file.attribute.FileTime created,Object key){}
+ private record Stamp(Path path,DirectoryIdentity directory,long size,java.nio.file.attribute.FileTime modified,java.nio.file.attribute.FileTime created,Object key){}
  private final Supplier<String> song;
  private final Decoder<T> decoder;
  private final Runnable changed;
@@ -51,7 +55,7 @@ final class LocalDiscService<T extends AutoCloseable> implements AutoCloseable {
  private String resolvedSong;
  private boolean resolved;
  private volatile boolean closed;
- private long nextScan,generation;
+ private long nextScan,generation,requestedAt;
  private List<String> names=DEFAULT_NAMES;
  void setNames(List<String> candidates){
   synchronized(lock){
@@ -67,6 +71,9 @@ final class LocalDiscService<T extends AutoCloseable> implements AutoCloseable {
   worker.scheduleWithFixedDelay(()->{try{poll();}catch(Throwable e){diagnostic("LOCAL_CD_ERROR "+failure(e));}},0,100,TimeUnit.MILLISECONDS);
  }
  static Path directory(String song){
+  Path audio=audioPath(song);return audio==null||!Files.isRegularFile(audio,NOFOLLOW_LINKS)?null:audio.getParent();
+ }
+ private static Path audioPath(String song){
   if(song==null||song.isBlank())return null;
   try{
    Path file;
@@ -76,7 +83,7 @@ final class LocalDiscService<T extends AutoCloseable> implements AutoCloseable {
     if(!drive&&song.matches("^[A-Za-z][A-Za-z0-9+.-]*:.*"))return null;
     file=Paths.get(song);
    }
-   file=file.toAbsolutePath().normalize();return Files.isRegularFile(file,NOFOLLOW_LINKS)?file.getParent():null;
+   return file.toAbsolutePath().normalize();
   }catch(Exception e){return null;}
  }
  static Path fileUrl(String value)throws java.net.URISyntaxException{
@@ -108,7 +115,16 @@ final class LocalDiscService<T extends AutoCloseable> implements AutoCloseable {
    generation++;nextScan=0;
    if(current==null||current.isBlank()){clearLocked();clearCacheLocked();rejected.clear();}
    else clearLocked();
-   resolved=false;requestedSong=current;changed.run();
+   resolved=false;requestedAt=clock.getAsLong();requestedSong=current;changed.run();
+  }
+ }
+ // Called by the UI clock, independently of a potentially stalled filesystem worker.
+ void resolveSlowLookup(String current){
+  if(current==null||current.isBlank())return;
+  synchronized(lock){
+   if(closed||resolved||!Objects.equals(current,requestedSong)
+     ||clock.getAsLong()-requestedAt<LOOKUP_WAIT_NANOS)return;
+   resolvedSong=current;resolved=true;changed.run();
   }
  }
  void poll(){
@@ -125,53 +141,69 @@ final class LocalDiscService<T extends AutoCloseable> implements AutoCloseable {
    request(current);
    if(now<nextScan)return;nextScan=now+TimeUnit.SECONDS.toNanos(1);ticket=generation;candidates=names;
   }
-  Path directory=directory(current);
+  Path audio=audioPath(current);
+  Path directory=audio==null?null:audio.getParent();
   if(directory==null){
    finishDefault(current,ticket);
    diagnostic("LOCAL_CD_DEFAULT no accessible song directory");return;
   }
+  try(var album=AlbumDirectory.open(directory)){
+   if(album.stamp(audio)==null)throw new DirectoryChanged();
+   if(scan(album,current,ticket,candidates,now))return;
+  }catch(IOException|SecurityException e){
+   finishDefault(current,ticket);
+   diagnostic("LOCAL_CD_DEFAULT album directory unavailable");return;
+  }
+  finishDefault(current,ticket);
+  diagnostic("LOCAL_CD_DEFAULT no usable same-directory image");
+ }
+ private boolean scan(AlbumDirectory album,String current,long ticket,List<String> candidates,long now)throws DirectoryChanged{
+  Path directory=album.path();
   for(String name:candidates){
-   if(closed||!Objects.equals(current,song.get()))return;
+   if(closed||!Objects.equals(current,song.get()))return true;
    Path file=directory.resolve(name);Stamp observed=null;
    try{
-    if(!Files.isRegularFile(file,NOFOLLOW_LINKS)){
+    Stamp stamp=album.stamp(file);
+    if(stamp==null){
      synchronized(lock){
-      if(closed||ticket!=generation)return;
+      if(closed||ticket!=generation)return true;
       evictPathLocked(file,null,true);
      }
      continue;
     }
-    Stamp stamp=stamp(file);observed=stamp;
+    observed=stamp;
     Cached<T> cached;
     synchronized(lock){
-     if(closed||ticket!=generation||!Objects.equals(current,requestedSong)||!Objects.equals(current,song.get()))return;
+     if(closed||ticket!=generation||!Objects.equals(current,requestedSong)||!Objects.equals(current,song.get()))return true;
      evictPathLocked(file,stamp,true);
      Rejected failed=rejected.get(file);
      // Recheck metadata on every scan. A replacement bypasses the cooldown;
      // unchanged failures are retried later so transient decoder errors recover.
      if(failed!=null&&stamp.equals(failed.stamp())&&now-failed.retryAt()<0)continue;
      rejected.remove(file);
-     if(Objects.equals(current,publishedSong)&&stamp.equals(publishedStamp)&&asset!=null)return;
+     if(Objects.equals(current,publishedSong)&&stamp.equals(publishedStamp)&&asset!=null)return true;
      cached=cache.get(stamp);
      if(cached!=null){
       retirePublicationLocked();asset=cached.value();
       publishedSong=current;publishedStamp=stamp;resolvedSong=current;resolved=true;changed.run();
      }
     }
-    if(cached!=null){diagnostic("LOCAL_CD_CACHE_HIT "+name);return;}
+    if(cached!=null){diagnostic("LOCAL_CD_CACHE_HIT "+name);return true;}
     if(stamp.size()>MAX_BYTES||stamp.size()<24)throw new IOException("image size limit");
     byte[] bytes;
     // Refuse a link even if the directory entry changed after the metadata check.
-    try(InputStream in=Files.newInputStream(file,NOFOLLOW_LINKS)){
+    try(InputStream in=album.read(file)){
+     if(!stamp.equals(album.stamp(file)))throw new IOException("image changed before reading");
      bytes=in.readNBytes(MAX_BYTES+1);
     }
+    if(!stamp.equals(album.stamp(file)))throw new IOException("image changed while decoding");
     int[] dimensions=dimensions(bytes);T decoded=decoder.decode(bytes,dimensions[0],dimensions[1]);
     if(decoded==null)throw new IOException("decoder returned no image");
     // Do not cache/publish a read that raced with a file replacement.
-    try{if(!stamp.equals(stamp(file)))throw new IOException("image changed while decoding");}
+    try{if(!stamp.equals(album.stamp(file)))throw new IOException("image changed while decoding");}
     catch(Exception error){closeAsset(decoded);throw error;}
     synchronized(lock){
-     if(closed||ticket!=generation||!Objects.equals(current,requestedSong)||!Objects.equals(current,song.get())){closeAsset(decoded);return;}
+     if(closed||ticket!=generation||!Objects.equals(current,requestedSong)||!Objects.equals(current,song.get())){closeAsset(decoded);return true;}
      clearLocked();
      // Keep one selected image per directory. Replacing a higher/lower priority
      // candidate retires the old selection while unrelated albums stay cached.
@@ -186,10 +218,11 @@ final class LocalDiscService<T extends AutoCloseable> implements AutoCloseable {
      }
      asset=decoded;publishedSong=current;publishedStamp=stamp;resolvedSong=current;resolved=true;changed.run();
     }
-    diagnostic("LOCAL_CD_READY "+name+" "+dimensions[0]+"x"+dimensions[1]);return;
-   }catch(Exception|LinkageError e){
+    diagnostic("LOCAL_CD_READY "+name+" "+dimensions[0]+"x"+dimensions[1]);return true;
+   }catch(DirectoryChanged e){throw e;}
+   catch(Exception|LinkageError e){
     synchronized(lock){
-     if(closed||ticket!=generation||!Objects.equals(current,requestedSong)||!Objects.equals(current,song.get()))return;
+     if(closed||ticket!=generation||!Objects.equals(current,requestedSong)||!Objects.equals(current,song.get()))return true;
      if(observed!=null){
       rejected.put(file,new Rejected(observed,clock.getAsLong()+REJECT_RETRY_NANOS));
       while(rejected.size()>candidates.size())rejected.remove(rejected.keySet().iterator().next());
@@ -198,13 +231,60 @@ final class LocalDiscService<T extends AutoCloseable> implements AutoCloseable {
     diagnostic("LOCAL_CD_REJECTED "+name+" "+failure(e));
    }
   }
-  finishDefault(current,ticket);
-  diagnostic("LOCAL_CD_DEFAULT no usable same-directory image");
+  return false;
  }
- private static Stamp stamp(Path file)throws IOException{
-  var attrs=Files.readAttributes(file,java.nio.file.attribute.BasicFileAttributes.class,NOFOLLOW_LINKS);
-  if(!attrs.isRegularFile())throw new IOException("not a regular disc image");
-  return new Stamp(file,attrs.size(),attrs.lastModifiedTime(),attrs.creationTime(),attrs.fileKey());
+ private static final class DirectoryChanged extends IOException {}
+ private record DirectoryIdentity(Path realPath,Object fileKey,java.nio.file.attribute.FileTime created){
+  static DirectoryIdentity read(Path path)throws IOException{
+   Path real=path.toRealPath();
+   var attrs=Files.readAttributes(real,BasicFileAttributes.class,NOFOLLOW_LINKS);
+   if(!attrs.isDirectory())throw new DirectoryChanged();
+   return new DirectoryIdentity(real,attrs.fileKey(),attrs.creationTime());
+  }
+ }
+ private record AlbumDirectory(Path path,DirectoryIdentity identity,DirectoryStream<Path> stream,
+                              SecureDirectoryStream<Path> secure) implements AutoCloseable {
+  static AlbumDirectory open(Path path)throws IOException{
+   var identity=DirectoryIdentity.read(path);
+   var stream=Files.newDirectoryStream(identity.realPath());
+   try{
+    SecureDirectoryStream<Path> secure=stream instanceof SecureDirectoryStream<Path> handle?handle:null;
+    if(secure!=null){
+     var attrs=secure.getFileAttributeView(BasicFileAttributeView.class).readAttributes();
+     if(!attrs.isDirectory()||!Objects.equals(identity.fileKey(),attrs.fileKey())
+        ||!identity.created().equals(attrs.creationTime()))throw new DirectoryChanged();
+    }
+    var album=new AlbumDirectory(path,identity,stream,secure);
+    album.verify();return album;
+   }catch(IOException|RuntimeException error){
+    try{stream.close();}catch(IOException closeError){error.addSuppressed(closeError);}
+    throw error;
+   }
+  }
+  void verify()throws DirectoryChanged{
+   try{if(identity.equals(DirectoryIdentity.read(path)))return;}
+   catch(IOException|SecurityException ignored){}
+   throw new DirectoryChanged();
+  }
+  Stamp stamp(Path file)throws IOException{
+   verify();
+   BasicFileAttributes attrs;
+   Path name=file.getFileName();
+   try{
+    attrs=secure==null?Files.readAttributes(identity.realPath().resolve(name),BasicFileAttributes.class,NOFOLLOW_LINKS):
+     secure.getFileAttributeView(name,BasicFileAttributeView.class,NOFOLLOW_LINKS).readAttributes();
+   }catch(NoSuchFileException missing){verify();return null;}
+   verify();
+   if(!attrs.isRegularFile())return null;
+   return new Stamp(file,identity,attrs.size(),attrs.lastModifiedTime(),attrs.creationTime(),attrs.fileKey());
+  }
+  InputStream read(Path file)throws IOException{
+   verify();
+   Path name=file.getFileName();
+   return secure==null?Files.newInputStream(identity.realPath().resolve(name),NOFOLLOW_LINKS):
+    Channels.newInputStream(secure.newByteChannel(name,Set.of(StandardOpenOption.READ,NOFOLLOW_LINKS)));
+  }
+  @Override public void close()throws IOException{stream.close();}
  }
  static int[] dimensions(byte[] bytes)throws IOException{
   byte[] signature={(byte)137,80,78,71,13,10,26,10};

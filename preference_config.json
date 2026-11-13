@@ -28,11 +28,10 @@
           "default_value": false
         },
         {
-          "type": "switch",
-          "key": "disc_vinyl",
-          "title": "默认盘面使用黑胶唱片",
-          "summary": "仅在没有可用的自定义盘面时生效。关闭时使用专辑封面 CD。",
-          "default_value": false
+          "type": "button",
+          "title": "默认盘面样式",
+          "summary": "选择专辑封面 CD、经典黑胶唱片或彩胶唱片。自定义盘面优先。",
+          "on_click": "io.github.tigerjx95.spwcdprobe.DiscAppearanceDialog.open"
         },
         {
           "type": "list",

@@ -27,10 +27,10 @@ import javax.swing.event.MouseInputAdapter;
 
 /** Opens the four-item ordering editor from the host's preference button. */
 public final class DiscOrderDialog implements AutoCloseable {
- private static final Color TEXT=new Color(0xeaf0f4);
- private static final Color MUTED=new Color(0xb9c5ce);
- private static final Color BLUE=new Color(0x49bdeb);
- private static final Font UI_FONT=chooseFont();
+ static final Color TEXT=new Color(0xeaf0f4);
+ static final Color MUTED=new Color(0xb9c5ce);
+ static final Color BLUE=new Color(0x49bdeb);
+ static final Font UI_FONT=chooseFont();
  private static volatile DiscOrderDialog active;
  private final DiscSettings settings;
  private final Supplier<String> artworkSource;
@@ -184,7 +184,7 @@ public final class DiscOrderDialog implements AutoCloseable {
   return new Font(Font.SANS_SERIF,Font.PLAIN,16);
  }
 
- private static JLabel label(String text,int size,int style,Color color){
+ static JLabel label(String text,int size,int style,Color color){
   var label=new JLabel(text);
   label.setFont(UI_FONT.deriveFont(style,(float)size));
   label.setForeground(color);
@@ -231,7 +231,7 @@ public final class DiscOrderDialog implements AutoCloseable {
   }
  }
 
- private static final class ActionButton extends JButton {
+ static final class ActionButton extends JButton {
   private final boolean primary;
 
   ActionButton(String text,boolean primary){

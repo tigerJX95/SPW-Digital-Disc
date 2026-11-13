@@ -4,11 +4,12 @@
 
 Adds a digital CD presentation to Salt Player (SPW), with a complete album cover and a CD extending from its right side.
 
-Current version: **v1.7.0**
+Current version: **v1.8.0**
 
-- Fixes a race where a background disc artwork lookup could overwrite the latest track request during rapid track changes.
-- Refreshes the display when the last usable custom disc image is deleted during playback, and switches to a replacement image once it is ready.
-- Fixes an abrupt return when the cover has finished enlarging and the disc has yet to slide out.
+- Choose Album Cover CD, Classic Black Vinyl, or Colored Vinyl in the default disc style dialog. Colored Vinyl offers six colors and defaults to Ocean Blue. Custom disc images take priority.
+- Colored vinyl has a translucent body, grouped grooves, curved highlights, and a tinted runout ring.
+- Fixed a disc display that could wait indefinitely when a network share stopped responding. The default disc now appears after about two seconds.
+- Fixed a case where replacing the parent directory during a custom artwork lookup could display the wrong disc. The plugin discards the lookup result when it detects the directory change.
 
 [Update history](CHANGELOG.md) (Chinese)
 
@@ -43,7 +44,7 @@ https://github.com/user-attachments/assets/8a289172-d79b-4e2e-9ba2-c7dc9ee5d86c
 
 ## Installation and use
 
-The steps below install **V1.7.0**. Interface mappings cover SPW 1.19.0 and 1.19.3 from the Microsoft Store. See [Verified SPW host versions](#verified-spw-host-versions) for Steam test results on Windows and Ubuntu 26.04.1 LTS (Linux). The plugin uses SPW's internal drawing interfaces, so later SPW versions may require compatibility updates.
+**V1.8.0** passed real-world testing with the Microsoft Store edition of SPW and the Steam edition on Windows and Ubuntu 26.04.1 LTS (Linux). Interface mappings cover SPW 1.19.0 and 1.19.3 from the Microsoft Store. The plugin uses SPW's internal drawing interfaces, so later SPW versions may require compatibility updates.
 
 1. Obtain the compiled `.spmod` file. The source ZIP cannot be installed directly; see the build instructions below to compile it yourself.
 2. In SPW's plugin manager, use the local plugin import option to select the `.spmod` file.
@@ -61,6 +62,8 @@ Collapsing the entire playback detail page or disabling the plugin cancels unfin
 
 > [!IMPORTANT]
 > **The audio and custom disc image must be regular files in the same folder.** The folder can be on a local drive, a mapped network drive, or an accessible UNC share. Artwork lookup skips symbolic links to either file.
+>
+> If a share responds slowly, the plugin shows the default disc after about two seconds. A successful lookup can still replace it with custom artwork for the current track.
 
 For example, use `D:\Music\Album\cd.png` alongside `D:\Music\Album\01.flac`, or `\\NAS\Music\Album\cd.png` alongside `\\NAS\Music\Album\01.flac`.
 
@@ -121,9 +124,11 @@ Only the disc rotates; the cover stays upright and the reflection shares the ang
 
 Verified on physical machines:
 
-- Windows 10 with SPW 1.19.3 from the Microsoft Store.
-- Windows with the Steam edition of SPW (plugin V1.5.0).
-- Ubuntu 26.04.1 LTS (Linux) with the Steam edition of SPW (plugin V1.5.0).
+| SPW channel | Operating system | V1.8.0 result |
+| --- | --- | --- |
+| Microsoft Store | Windows | Passed |
+| Steam | Windows | Passed |
+| Steam | Ubuntu 26.04.1 LTS (Linux) | Passed |
 
 Offline tests cover interface resolution, cover calls, configuration storage, images, animations and rotation state. They do not run Windows native playback or Skia rendering. Startup verifies playback-controller and sheet-state fingerprints, then locates the cover entry, caller and sheet-state accessor using metadata, signatures and a unique call relationship. The cover painter must be the unique structural match and pass an implementation fingerprint normalized for its own obfuscated identifiers and debug metadata. Discovery results are cached per host class loader. Missing or ambiguous targets prevent activation with a detailed error. Startup also validates playback and artwork-loading interfaces and rejects incompatible hosts. If playback state cannot be read during operation, rotation stops and a warning is logged.
 
@@ -204,7 +209,7 @@ If using PowerShell, configure the same environment variables and run this in th
 After the build reports `BUILD SUCCESSFUL`, look in the source directory's `dist` folder for:
 
 ```text
-SPW_Digital_Disc_v1.7.0.spmod
+SPW_Digital_Disc_v1.8.0.spmod
 ```
 
 This is the installation package that SPW can import. You do not need to ZIP the entire source directory or rename its extension. The `build` directory contains intermediate build output, not the installation package.

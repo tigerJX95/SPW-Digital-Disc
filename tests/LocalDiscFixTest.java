@@ -82,7 +82,37 @@ public class LocalDiscFixTest {
   Files.write(preferred,new byte[]{1});expect(service,current.get(),colors[1]);
   check("cd.jpg".equals(service.artworkStatus(current.get()).fileName()),"report switches to the next usable file after decode failure");
   Files.delete(preferred);Files.delete(alias);
-  service.close();System.out.println("PASS PNG/JPEG four-file priority, corrupt fallback, real JPEG decode, raw host URL with spaces/percent/Unicode/#/?, encoded URL, normal path, diagnostic details");
+  service.close();
+  verifyDirectoryReplacement();
+  System.out.println("PASS PNG/JPEG four-file priority, corrupt fallback, real JPEG decode, raw host URL with spaces/percent/Unicode/#/?, encoded URL, normal path, diagnostic details");
   System.out.println("Windows SPW native rendering still requires real-machine validation.");
+ }
+ static void verifyDirectoryReplacement()throws Exception{
+  Path root=Files.createTempDirectory("disc-parent-change");
+  Path album=Files.createDirectory(root.resolve("album"));
+  Path retired=root.resolve("retired");
+  Path song=Files.write(album.resolve("track.flac"),new byte[]{1});
+  Files.write(album.resolve("cd.png"),image("png",0xffff0000));
+  var decoded=new AtomicReference<LocalDiscServiceTest.Asset>();
+  try(var service=new LocalDiscService<LocalDiscServiceTest.Asset>(song::toString,(bytes,w,h)->{
+   Files.move(album,retired);
+   Files.createDirectory(album);
+   Files.copy(retired.resolve("track.flac"),song);
+   Files.write(album.resolve("cd.png"),image("png",0xff0000ff));
+   var asset=new LocalDiscServiceTest.Asset(bytes);decoded.set(asset);return asset;
+  },()->{},s->{})){
+   service.poll();
+   check(decoded.get()!=null&&decoded.get().closed==1,"directory replacement must discard the decoded image");
+   check(service.isResolved(song.toString())&&LocalDiscServiceTest.get(service,song.toString())==null,
+       "directory replacement must select default");
+  }finally{
+   for(Path directory:List.of(album,retired)){
+    Files.deleteIfExists(directory.resolve("cd.png"));
+    Files.deleteIfExists(directory.resolve("track.flac"));
+    Files.deleteIfExists(directory);
+   }
+   Files.deleteIfExists(root);
+  }
+  System.out.println("PASS parent-directory replacement discards the old image and falls back");
  }
 }
