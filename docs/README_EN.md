@@ -4,12 +4,15 @@
 
 Adds a digital CD presentation to Salt Player (SPW), with a complete album cover and a CD extending from its right side.
 
-Current version: **v1.8.0**
+Current stable version: **v1.9.0**
 
-- Choose Album Cover CD, Classic Black Vinyl, or Colored Vinyl in the default disc style dialog. Colored Vinyl offers six colors and defaults to Ocean Blue. Custom disc images take priority.
-- Colored vinyl has a translucent body, grouped grooves, curved highlights, and a tinted runout ring.
-- Fixed a disc display that could wait indefinitely when a network share stopped responding. The default disc now appears after about two seconds.
-- Fixed a case where replacing the parent directory during a custom artwork lookup could display the wrong disc. The plugin discards the lookup result when it detects the directory change.
+- Random Color for Colored Vinyl selects from the six presets and keeps the same color for an album during the current session.
+- Custom disc image dimension checks read the loaded bytes directly to reduce copying. Stale requests stop before full decoding.
+- If a custom disc image fails to draw, the default disc appears in the same frame. Lookup temporarily skips the failed image and tries other candidates. Replacing the image allows it to load again.
+- Fixed an abrupt cutoff near the end of disc retraction in front mode.
+- Cover Border Trimming is off by default. Choose paired horizontal or vertical borders, or trim only the disc-side strip when both the left and right edges have continuous near-white borders.
+
+  Trimming affects only the secondary display and leaves the original artwork file intact. Stretching a heavily cropped image to fill a square can distort people in the cover art, so the plugin uses the cropped aspect ratio when the result is substantially wider or taller than a square. Trimming checks the color of edge pixels. Top and bottom borders must match. If text or other details interrupt a border, both edges are preserved. This feature detects only white or near-white edges. Red, black, and other borders are preserved because they may be part of the original composition. A white border may also be retained if it has a noticeable color cast, marks, or text and artwork extending to the edge. For a square cover that preserves the original proportions and composition, we recommend using an AI image tool to extend the background, then setting the result as the album cover.
 
 [Update history](CHANGELOG.md) (Chinese)
 
@@ -87,7 +90,7 @@ The main supported and tested range is **1000 × 1000 to 4000 × 4000 pixels**, 
 > [!NOTE]
 > **Create disc artwork with the PSD template**
 >
-> [Download cdArt_Template.psd](templates/cdArt_Template.psd). This Photoshop template uses a **1000 × 1000 pixel** canvas with a circular outer edge, center hole, hub rings and optional shading. It helps turn disc scans, photographs or custom designs into transparent PNG artwork for the player.
+> [Download cdArt_Template.psd](../templates/cdArt_Template.psd). This Photoshop template uses a **1000 × 1000 pixel** canvas with a circular outer edge, center hole, hub rings and optional shading. It helps turn disc scans, photographs or custom designs into transparent PNG artwork for the player.
 >
 > 1. **Open the template and save a copy.** Keep the original PSD for future use.
 > 2. **Choose a disc style.** Enable one style group containing a `YOUR IMAGE HERE` placeholder and disable the other equivalent style groups.
@@ -163,7 +166,7 @@ Provide the host file from the matching SPW installation. A generic FFmpeg DLL w
 
 ### 2. Extract the source and configure Windows
 
-Extract the entire source ZIP and open the directory containing `build.cmd`, `build.gradle`, `MANIFEST.MF`, and `src`. Do not run scripts from inside the ZIP archive.
+Extract the entire source ZIP and open the directory containing `build.gradle`, `plugin/`, and `src/`. Do not run scripts from inside the ZIP archive.
 
 Open **Command Prompt (CMD)** and set the environment variables for your installation. These paths are examples:
 
@@ -191,7 +194,7 @@ In the same CMD window, switch to the extracted source directory, for example:
 
 ```bat
 cd /d "D:\Projects\SPW-Digital-Disc"
-build.cmd "C:\Path\To\SPW\app\ffmpeg-x64.dll"
+scripts\build.cmd "C:\Path\To\SPW\app\ffmpeg-x64.dll"
 ```
 
 Replace the host path on the second line with the real path. Keep the double quotes if it contains spaces. The script invokes Gradle's `plugin` task to check host components, compile the Java source, and package the plugin. The bytecode target remains Java 21. The host is a `compileOnly` dependency and is not bundled into the plugin.
@@ -199,7 +202,7 @@ Replace the host path on the second line with the real path. Keep the double quo
 If using PowerShell, configure the same environment variables and run this in the source directory:
 
 ```powershell
-.\build.cmd "C:\Path\To\SPW\app\ffmpeg-x64.dll"
+.\scripts\build.cmd "C:\Path\To\SPW\app\ffmpeg-x64.dll"
 ```
 
 `build.cmd` requires the host path argument and does not install development tools automatically. Double-clicking it does not complete a build. To rebuild after changing the source, run the same command again.
@@ -209,7 +212,7 @@ If using PowerShell, configure the same environment variables and run this in th
 After the build reports `BUILD SUCCESSFUL`, look in the source directory's `dist` folder for:
 
 ```text
-SPW_Digital_Disc_v1.8.0.spmod
+SPW_Digital_Disc_v1.9.0.spmod
 ```
 
 This is the installation package that SPW can import. You do not need to ZIP the entire source directory or rename its extension. The `build` directory contains intermediate build output, not the installation package.
@@ -221,7 +224,7 @@ Import the `.spmod` through SPW's plugin manager, grant `class-transform` and `l
 Set `JAVA_HOME`, add the JDK and Gradle `bin` directories to `PATH`, and make sure `python3` is available. Run this in the source directory:
 
 ```sh
-bash build.sh "/path/to/SPW/app/ffmpeg-x64.dll"
+bash scripts/build.sh "/path/to/SPW/app/ffmpeg-x64.dll"
 ```
 
 You still need the matching SPW Windows host file. Output is also placed in `dist/`. The build platform and host compatibility are separate: runtime compatibility still depends on matching host interfaces. See the verified versions above.
@@ -241,7 +244,7 @@ The pre-build check verifies SHA-256 fingerprints for the host archive and key c
 
 ## Third-party components and license
 
-The project uses the [MIT License](LICENSE).
+The project uses the [MIT License](../LICENSE).
 
 See [Third-party notices](THIRD_PARTY_NOTICES.md) (Chinese) for details. The project does not distribute sample commercial album covers, disc artwork, or the SPW host and its dependencies. User-provided music and images are outside the scope of this project's MIT license.
 

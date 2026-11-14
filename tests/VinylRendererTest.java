@@ -36,6 +36,7 @@ public class VinylRendererTest {
   var ringOpacities=new java.util.HashSet<Integer>();
   var palettePixels=new java.util.HashSet<Integer>();
   for(var color:DiscSettings.VinylColor.values()){
+   if(color==DiscSettings.VinylColor.RANDOM)continue;
    var sample=new RootRasterTest.Raster(800,400);
    RootRenderer.paint(sample.scope,2,sample::source,(s,x,y,d)->false,sample::path,1,100,false,null,90,true,color);
    check(palettePixels.add(sample.bitmap.getRGB(600,65)),"each color refreshes the cached finish");

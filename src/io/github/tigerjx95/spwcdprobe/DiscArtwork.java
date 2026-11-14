@@ -78,7 +78,7 @@ final class DiscArtwork {
   }
  }
  // ImageIO can seek through the bounded byte array without retaining a second encoded copy.
- private static final class ArtworkInput extends ImageInputStreamImpl {
+ static final class ArtworkInput extends ImageInputStreamImpl {
   private final byte[] bytes;
   ArtworkInput(byte[] bytes){this.bytes=bytes;}
   @Override public int read()throws IOException{

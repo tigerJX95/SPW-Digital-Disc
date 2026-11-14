@@ -40,6 +40,21 @@ public class FrontDiscMotionTest {
   var opening=FrontRendererTest.render(50,.1f,true,true,true);
   var retracting=FrontRendererTest.render(50,.1f,true,true,true);
   check(FrontRendererTest.equal(opening.bitmap,retracting.bitmap),"same normalized progress has identical entry/retract pixels and reflection");
+  // Cropping wide white bars leaves a cover much narrower than the disc.
+  for(int amount:new int[]{10,50,100})for(float progress:new float[]{.025f,.05f,.1f,.2f,1f}){
+   int side=240,width=Math.round(side*DiscExposure.widthFactor(amount));
+   var raster=new RootRasterTest.Raster(width,side);
+   var layerForFrame=FrontRendererTest.layer();
+   RootRenderer.paint(raster.scope,.5f,raster::source,(scope,cx,cy,diameter)->{
+    check(cx-diameter*.5f>=-.001f&&cx+diameter*.5f<=width+.001f,
+       "trimmed portrait front disc fits at every retract position");
+    check(Math.abs(diameter-side*.98f)<.001f,"retract keeps the full disc diameter");
+    raster.graphics.setColor(Color.RED);
+    raster.graphics.fill(new Ellipse2D.Float(cx-diameter*.5f,cy-diameter*.5f,diameter,diameter));
+    return true;
+   },raster::path,progress,amount,true,layerForFrame,0,false,DiscSettings.VinylColor.BLACK,true);
+   check(raster.saved.isEmpty(),"trimmed front fade restores the canvas");
+  }
   System.out.println("PASS 101 opacity samples, 900 cached-paint layer draws, whole-circle uniform fade, fully-open layer bypass, 36 actual renderer/reflection frames, reversible pixels and no moving wipe");
  }
 }

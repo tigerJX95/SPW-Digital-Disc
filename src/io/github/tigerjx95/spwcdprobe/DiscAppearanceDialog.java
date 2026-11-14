@@ -83,11 +83,11 @@ public final class DiscAppearanceDialog implements AutoCloseable {
    styleRow.add(button);
   }
   fields.add(styleRow);
-  var palette=new JPanel(new GridLayout(2,3,8,8));
+  var palette=new JPanel(new GridLayout(0,3,8,8));
   palette.setOpaque(false);
   for(var color:DiscSettings.VinylColor.values()){
    if(color==DiscSettings.VinylColor.BLACK)continue;
-   var button=option(color.label,color.name(),colors,color==initial.color(),new Color(color.shade(85)));
+   var button=option(color.label,color.name(),colors,color==initial.color(),color==DiscSettings.VinylColor.RANDOM?null:new Color(color.shade(85)));
    button.addActionListener(event->refresh.run());
    colorButtons.add(button);
    palette.add(button);
@@ -141,9 +141,36 @@ public final class DiscAppearanceDialog implements AutoCloseable {
    button.setDisabledIcon(new Swatch(swatch.darker().darker()));
    button.setIconTextGap(8);
   }
+  if(command.equals(DiscSettings.VinylColor.RANDOM.name())){
+   var icon=new RandomSwatch();
+   button.setIcon(icon);
+   button.setDisabledIcon(icon);
+   button.setIconTextGap(8);
+  }
   group.add(button);
   button.setSelected(selected);
   return button;
+ }
+
+ private static final class RandomSwatch implements Icon {
+  private static final DiscSettings.VinylColor[] COLORS={
+   DiscSettings.VinylColor.BLUE,DiscSettings.VinylColor.GREEN,DiscSettings.VinylColor.AMBER,
+   DiscSettings.VinylColor.RED,DiscSettings.VinylColor.PINK,DiscSettings.VinylColor.PURPLE
+  };
+  @Override public int getIconWidth(){return 20;}
+  @Override public int getIconHeight(){return 20;}
+  @Override public void paintIcon(Component component,Graphics graphics,int x,int y){
+   var g=(Graphics2D)graphics.create();
+   g.setRenderingHint(RenderingHints.KEY_ANTIALIASING,RenderingHints.VALUE_ANTIALIAS_ON);
+   for(int i=0;i<COLORS.length;i++){
+    var color=new Color(COLORS[i].shade(85));
+    g.setColor(component.isEnabled()?color:color.darker().darker());
+    g.fillArc(x,y,19,19,90+i*60,60);
+   }
+   g.setColor(new Color(255,255,255,65));
+   g.drawOval(x,y,19,19);
+   g.dispose();
+  }
  }
 
  private record Swatch(Color color) implements Icon {

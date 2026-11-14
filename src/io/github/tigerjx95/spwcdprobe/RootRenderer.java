@@ -98,17 +98,38 @@ final class RootRenderer {
   paint(scope,aspect,source,disc,paths,exposure,amount,front,layer,angle,vinyl,DiscSettings.VinylColor.BLACK);
  }
  static void paint(DrawScope scope,float aspect,Source source,Disc disc,Supplier<Path> paths,float exposure,int amount,boolean front,FrontDiscLayer layer,float angle,boolean vinyl,DiscSettings.VinylColor color)throws Exception{
+  paint(scope,aspect,source,disc,paths,exposure,amount,front,layer,angle,vinyl,color,false);
+ }
+ static float fittedWidth(float side,float aspect){return side*Math.min(1f,aspect);}
+ static float fittedHeight(float side,float aspect){return side/Math.max(1f,aspect);}
+ static void paint(DrawScope scope,float aspect,Source source,Disc disc,Supplier<Path> paths,float exposure,int amount,boolean front,FrontDiscLayer layer,float angle,boolean vinyl,DiscSettings.VinylColor color,boolean fitTrimmed)throws Exception{
   exposure=Math.max(0,Math.min(1,exposure));
   long size=(Long)SIZE.invoke(scope);float w=x(size),h=y(size),side=Math.min(h,w/DiscExposure.widthFactor(amount));
   if(side<=0||!Float.isFinite(side))return;
   // The complete group fits its independently measured width at every amount.
-  float cx=DiscExposure.center(side,exposure,amount),cy=side*.5f,r=side*.49f;
+  float coverWidth=fittedWidth(side,aspect),coverHeight=fittedHeight(side,aspect);
+  float right=fitTrimmed?(side+coverWidth)*.5f:side;
+  float discSide=fitTrimmed?Math.min(side,coverHeight):side;
+  float r=discSide*.49f,cy=side*.5f;
+  float travel=discSide*DiscExposure.fraction(amount);
+  float cx=DiscExposure.center(side,exposure,amount);
+  if(fitTrimmed){
+   float closed=right-r;
+   if(front&&closed<r){
+    // A narrow sleeve cannot hide a full-height front disc. Keep the circle
+    // inside the canvas throughout the fade, preserving its open position
+    // whenever there is room for that position.
+    float open=Math.max(r,closed+travel);
+    closed=Math.min(side*.5f,open);
+    cx=closed+(open-closed)*exposure;
+   }else cx=closed+travel*exposure;
+  }
   if(front)cover(scope,aspect,source,side);
   Canvas moving=scope.getDrawContext().getCanvas();moving.save();
   try{
    // Front discs stay whole throughout their motion. Only the fixed Canvas
    // bounds clip them; there is no right-to-left reveal edge over the sleeve.
-   CLIP_RECT.invoke(moving,front?0f:side,0f,w,side,1);
+   CLIP_RECT.invoke(moving,front?0f:right,0f,w,side,1);
    if(exposure>0&&DiscExposure.fraction(amount)>0){
    boolean blended=front&&layer.begin(moving,w,side,exposure);
    moving.save();
@@ -179,7 +200,7 @@ final class RootRenderer {
                        :new float[]{0,.38f,.54f,.71f,.87f,.98f,1};
   // Match perceptual lightness and chroma across the six translucent runout tints.
   int runout=switch(color){
-   case BLUE -> 0x35bfe5;
+   case BLUE, RANDOM -> 0x35bfe5;
    case GREEN -> 0x60c68f;
    case AMBER -> 0xd7a447;
    case PURPLE -> 0xc398ec;
@@ -303,7 +324,7 @@ final class RootRenderer {
  }
  private static void cover(DrawScope scope,float aspect,Source source,float side)throws Exception{
   // Complete source fitted proportionally into its own square, drawn over CD.
-  float cw=aspect>=1?side:side*aspect,ch=aspect>=1?side/aspect:side;
+  float cw=fittedWidth(side,aspect),ch=fittedHeight(side,aspect);
   Canvas canvas=scope.getDrawContext().getCanvas();canvas.save();
   try{canvas.translate((side-cw)*.5f,(side-ch)*.5f);source.draw(scope,cw,ch);}finally{canvas.restore();}
  }

@@ -13,7 +13,7 @@
 - 项目：<https://github.com/Jacob7179/SPW-Animated-Album-Art>
 - 参考内容：宿主原生节点遍历、隔离镜像层和倒影渐隐的实现方式。
 - 许可：MIT；版权声明为 `Copyright (c) 2026 Jacob`。
-- 保留的完整许可证：[SPW-Animated-Album-Art-MIT.txt](licenses/SPW-Animated-Album-Art-MIT.txt)。
+- 保留的完整许可证：[SPW-Animated-Album-Art-MIT.txt](../licenses/SPW-Animated-Album-Art-MIT.txt)。
 
 参考插件自身的其他素材或功能不因此成为本项目依赖；本项目未收录其视频或商业唱片素材。
 
@@ -23,7 +23,7 @@
 - 项目：<https://github.com/tigerJX95/ReBORN-CHS-Mod>
 - 参考内容： 渐进出碟、收碟完成回调和布局缓动方法。
 - 本插件使用独立 Java 状态机实现，参考其平滑出碟和收碟节奏，封面缩放等方法。
-- 保留上游原始贡献部分的 [MIT 许可声明](licenses/ReBORN-CHS-Mod-MIT.txt)。
+- 保留上游原始贡献部分的 [MIT 许可声明](../licenses/ReBORN-CHS-Mod-MIT.txt)。
 - 不随包分发该主题的图片或播放器资源。
 
 
@@ -39,5 +39,5 @@ JDK、Gradle 和 Python 是外部构建工具。
 
 ## 本项目
 
-本项目代码采用 [MIT License](LICENSE)，版权声明为 `Copyright (c) 2026 tigerJX95`。
+本项目代码采用 [MIT License](../LICENSE)，版权声明为 `Copyright (c) 2026 tigerJX95`。
 分发代码或其中的重要部分时，请按 MIT 条款保留相应版权与许可声明，包括适用的第三方声明。

@@ -1,6 +1,7 @@
 package io.github.tigerjx95.spwcdprobe;
 import com.xuncorp.spw.workshop.api.config.*;
 import java.util.List;
+import java.util.Objects;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.*;
 import javax.swing.SwingUtilities;
@@ -12,6 +13,8 @@ final class DiscSettings implements AutoCloseable {
  static final String STYLE_KEY="disc_style";
  static final String VINYL_COLOR_KEY="disc_vinyl_color";
  static final String MOTION_SPEED_KEY="disc_motion_speed";
+ static final String TRIM_COVER_KEY="cover_white_border_mode";
+ static final String LEGACY_TRIM_COVER_KEY="trim_cover_white_borders";
  static final String ROTATION_SPEED_KEY="disc_rotation_speed";
  static final String LOCAL_NAMES_KEY="disc_local_names";
  enum Speed {
@@ -23,7 +26,15 @@ final class DiscSettings implements AutoCloseable {
  }
  enum VinylColor {
   BLACK("黑色",0x555555), BLUE("海洋蓝",0x25b5d6), GREEN("翡翠绿",0x4ec68b),
-  AMBER("琥珀金",0xf3b950), PURPLE("鸢尾紫",0xb98de1), PINK("樱花粉",0xf4a8cb), RED("玫瑰红",0xd25970);
+  AMBER("琥珀金",0xf3b950), PURPLE("鸢尾紫",0xb98de1), PINK("樱花粉",0xf4a8cb), RED("玫瑰红",0xd25970), RANDOM("随机色",0x25b5d6);
+  private static final List<VinylColor> PALETTE=List.of(BLUE,GREEN,AMBER,PURPLE,PINK,RED);
+  VinylColor resolve(String album,String albumArtist,String artist,int year,String path,int salt){
+   if(this!=RANDOM)return this;
+   int key=album==null||album.isBlank()?Objects.hashCode(path):
+    Objects.hash(album,albumArtist==null||albumArtist.isBlank()?artist:albumArtist,year);
+   int mixed=(key^salt)*0x9e3779b9;
+   return PALETTE.get(Math.floorMod(mixed^(mixed>>>16),PALETTE.size()));
+  }
   final String label;
   private final int rgb;
   VinylColor(String label,int rgb){this.label=label;this.rgb=rgb;}
@@ -45,9 +56,9 @@ final class DiscSettings implements AutoCloseable {
   }
   VinylColor finish(){return style==Style.COLORED_VINYL?color:VinylColor.BLACK;}
  }
- record Values(int amount,boolean front,boolean rotate,Appearance appearance,Speed motionSpeed,Speed rotationSpeed,List<String> localNames){
+ record Values(int amount,boolean front,boolean rotate,Appearance appearance,Speed motionSpeed,Speed rotationSpeed,List<String> localNames,CoverWhiteBorders.Mode trimCover){
   Values(int amount,boolean front,boolean rotate,boolean vinyl,Speed motionSpeed,Speed rotationSpeed){
-   this(amount,front,rotate,new Appearance(vinyl?Style.BLACK_VINYL:Style.CD,VinylColor.BLUE),motionSpeed,rotationSpeed,LocalDiscService.DEFAULT_NAMES);
+   this(amount,front,rotate,new Appearance(vinyl?Style.BLACK_VINYL:Style.CD,VinylColor.BLUE),motionSpeed,rotationSpeed,LocalDiscService.DEFAULT_NAMES,CoverWhiteBorders.Mode.OFF);
   }
   Values(int amount,boolean front,boolean rotate,boolean vinyl){this(amount,front,rotate,vinyl,Speed.STANDARD,Speed.STANDARD);}
   boolean vinyl(){return appearance.style()!=Style.CD;}
@@ -82,7 +93,15 @@ final class DiscSettings implements AutoCloseable {
   boolean rotate;
   try{Object value=config.get(ROTATE_KEY,false);rotate=Boolean.TRUE.equals(value)||value instanceof String text&&text.equalsIgnoreCase("true");}
   catch(RuntimeException invalid){rotate=false;}
-  return new Values(amount,front,rotate,appearance(config),speed(config,MOTION_SPEED_KEY),speed(config,ROTATION_SPEED_KEY),localNames(config));
+  return new Values(amount,front,rotate,appearance(config),speed(config,MOTION_SPEED_KEY),speed(config,ROTATION_SPEED_KEY),localNames(config),trimCover(config));
+ }
+ static CoverWhiteBorders.Mode trimCover(ConfigHelper config){
+  try{
+   String mode=config.get(TRIM_COVER_KEY,"");
+   if(!mode.isEmpty())return CoverWhiteBorders.Mode.valueOf(mode);
+   return Boolean.parseBoolean(String.valueOf(config.get(LEGACY_TRIM_COVER_KEY,false)))
+     ?CoverWhiteBorders.Mode.PAIRED:CoverWhiteBorders.Mode.OFF;
+  }catch(RuntimeException invalid){return CoverWhiteBorders.Mode.OFF;}
  }
  Appearance appearance(){return appearance(manager.getConfig("config.json"));}
  private static Appearance appearance(ConfigHelper config){

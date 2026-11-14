@@ -4,12 +4,15 @@
 
 为 Salt Player（椒盐播放器，简称 SPW）增加“完整专辑封面＋右侧 CD”的数字唱片展示效果。
 
-当前版本：**v1.8.0**
+当前正式版：**v1.9.0**
 
-- 在「默认盘面样式」中可选择专辑封面 CD、经典黑胶唱片或彩胶唱片。彩胶提供六种颜色，默认使用海洋蓝。自定义盘面优先。
-- 彩胶盘身半透，带分组沟纹、弧形反光与中央有色过渡环。
-- 修复共享目录长时间无响应时盘面可能一直等待的问题。等待约 2 秒后先显示默认盘面。
-- 修复查找自定义盘面期间父目录被替换时可能显示错误盘面的问题。检测到目录变化后丢弃本次查找结果。
+- 彩胶新增「随机色」，从六种预设中选色。同一专辑在本次运行内保持同色。
+- 自定义盘面尺寸检查直接读取已载入的数据，减少内存拷贝。过期请求在完整解码前结束。
+- 自定义盘面绘制失败时当帧显示默认盘面，查找时暂时跳过失败图片并继续尝试其他候选。图片替换后可重新加载。
+- 修复碟片前置时收碟末段可能出现的生硬截断。
+- 「封面白边裁切」默认关闭。可自动裁切成对的左右或上下白边，或在左右两侧均有连续近白色边缘时，只裁靠近碟片的右侧。
+
+  裁切只影响二级展示页的显示，原始封面文件保持原样。明显的宽白边会压缩画面内容，裁去后若强行拉伸填满正方形，人物容易变宽或变扁。因此，裁切后长宽差明显的封面按裁切后的比例显示。裁切依据边缘像素的颜色判断。上下白边需成对匹配，检测到文字或其他细节打断白边时，会保留上下两侧。此功能仅识别白色或近白色边缘。红色、黑色等边框保留原样，因为它们可能是原封面构图的一部分。白边带有明显偏色、污点或贴边的文字与图案时，也可能保留。若希望保留人物比例和完整构图，同时获得铺满画面的方形封面，建议自行用 AI 图像工具扩展背景，再将处理好的图片设为专辑封面。
 
 [更新历史](CHANGELOG.md)
 
@@ -89,7 +92,7 @@ https://github.com/user-attachments/assets/8a289172-d79b-4e2e-9ba2-c7dc9ee5d86c
 > [!NOTE]
 > **使用 PSD 模板制作盘面**
 >
-> [下载 cdArt_Template.psd](templates/cdArt_Template.psd)。这是用于制作数字化 CD 盘面的 Photoshop 模板，画布尺寸为 **1000 × 1000 像素**。模板包含圆形外沿、中心孔、压环和可选明暗效果，便于将盘面扫描图、照片或自定义图案整理为适合播放器展示的透明 PNG。
+> [下载 cdArt_Template.psd](../templates/cdArt_Template.psd)。这是用于制作数字化 CD 盘面的 Photoshop 模板，画布尺寸为 **1000 × 1000 像素**。模板包含圆形外沿、中心孔、压环和可选明暗效果，便于将盘面扫描图、照片或自定义图案整理为适合播放器展示的透明 PNG。
 >
 > 1. **打开模板并另存副本**，保留原始 PSD，方便之后重复使用。
 > 2. **选择盘面样式**：在包含 `YOUR IMAGE HERE` 占位层的样式组中选择一种，开启该组并关闭其他同类样式组。
@@ -166,7 +169,7 @@ https://github.com/user-attachments/assets/8a289172-d79b-4e2e-9ba2-c7dc9ee5d86c
 
 ### 2. 解压源码并配置 Windows 环境
 
-完整解压源码 ZIP，进入包含 `build.cmd`、`build.gradle`、`MANIFEST.MF` 和 `src` 的目录。不要直接在压缩包中运行脚本。
+完整解压源码 ZIP，进入包含 `build.gradle`、`plugin/` 和 `src/` 的目录。不要直接在压缩包中运行脚本。
 
 打开 **命令提示符（CMD）**，按实际安装位置设置环境变量。以下路径仅为示例：
 
@@ -194,7 +197,7 @@ python --version
 
 ```bat
 cd /d "D:\Projects\SPW-Digital-Disc"
-build.cmd "C:\你的SPW安装目录\app\ffmpeg-x64.dll"
+scripts\build.cmd "C:\你的SPW安装目录\app\ffmpeg-x64.dll"
 ```
 
 把第二行的宿主路径替换成真实路径，路径含空格时保留双引号。脚本会调用 Gradle 的 `plugin` 任务，检查宿主组件、编译 Java 源码并打包插件。字节码目标保持为 Java 21，宿主仅作为 `compileOnly` 依赖，不会被打入插件。
@@ -202,7 +205,7 @@ build.cmd "C:\你的SPW安装目录\app\ffmpeg-x64.dll"
 若使用 PowerShell，先配置好同样的环境变量，在源码目录执行：
 
 ```powershell
-.\build.cmd "C:\你的SPW安装目录\app\ffmpeg-x64.dll"
+.\scripts\build.cmd "C:\你的SPW安装目录\app\ffmpeg-x64.dll"
 ```
 
 `build.cmd` 需要宿主路径参数，不会自动安装开发工具；直接双击不会完成构建。重新生成安装包时，修改源码后再次运行同一条命令即可。
@@ -212,7 +215,7 @@ build.cmd "C:\你的SPW安装目录\app\ffmpeg-x64.dll"
 构建显示 `BUILD SUCCESSFUL` 后，在源码目录的 `dist` 文件夹中找到：
 
 ```text
-SPW_Digital_Disc_v1.8.0.spmod
+SPW_Digital_Disc_v1.9.0.spmod
 ```
 
 这就是可供 SPW 导入的插件安装包，无需再将整个源码目录压缩或更改后缀。`build` 目录是编译中间产物，不是安装包。
@@ -224,7 +227,7 @@ SPW_Digital_Disc_v1.8.0.spmod
 配置 `JAVA_HOME`、将 JDK 和 Gradle 的 `bin` 加入 `PATH`，确保 `python3` 可用，在源码目录运行：
 
 ```sh
-bash build.sh "/path/to/SPW/app/ffmpeg-x64.dll"
+bash scripts/build.sh "/path/to/SPW/app/ffmpeg-x64.dll"
 ```
 
 同样需要对应的 SPW Windows 宿主文件，产物也位于 `dist/`。构建平台与宿主兼容性是两件事，运行时仍按宿主内部接口匹配适配配置；已验证版本见上表。
@@ -244,7 +247,7 @@ bash build.sh "/path/to/SPW/app/ffmpeg-x64.dll"
 
 ## 第三方与许可证
 
-项目采用 [MIT License](LICENSE)。
+项目采用 [MIT License](../LICENSE)。
 
 详细区分见 [第三方说明](THIRD_PARTY_NOTICES.md)。本项目不随包分发示例唱片封面、商业盘面素材或 SPW 宿主及其依赖；用户自行提供的音乐与图片不属于本项目 MIT 许可范围。
 

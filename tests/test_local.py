@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Offline regression runner. Run after build.cmd/build.sh. No CI workflow required."""
+"""Offline regression runner. Run after scripts/build.cmd or scripts/build.sh. No CI workflow required."""
 import os
 import subprocess
 import sys
 from pathlib import Path
 
-root = Path(__file__).resolve().parent
+root = Path(__file__).resolve().parent.parent
 os.chdir(root)
 host = Path(sys.argv[1]).resolve()
 java_home = Path(os.environ['JAVA_HOME'])

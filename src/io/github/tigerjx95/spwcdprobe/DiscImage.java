@@ -25,6 +25,8 @@ final class DiscImage implements AutoCloseable {
  private final Bitmap nativeBitmap;
  private final ImageBitmap bitmap;
  private final int width,height;
+ private CoverWhiteBorders.Bounds coverBounds;
+ private CoverWhiteBorders.Mode coverMode;
  private DiscImage(Bitmap bitmap){nativeBitmap=bitmap;this.bitmap=SkiaImageAsset_skikoKt.asComposeImageBitmap(bitmap);width=bitmap.getWidth();height=bitmap.getHeight();}
  static DiscImage decode(byte[] bytes,int width,int height)throws Exception{
   var prepared=DiscArtwork.prepare(bytes,width,height);
@@ -57,6 +59,18 @@ final class DiscImage implements AutoCloseable {
  float aspect(){return (float)width/height;}
  void drawCover(DrawScope scope,float w,float h)throws Exception{
   DRAW_IMAGE.invoke(scope,bitmap,0L,pack(width,height),0L,pack(Math.max(1,Math.round(w)),Math.max(1,Math.round(h))),1f,Fill.INSTANCE,null,3);
+ }
+ CoverWhiteBorders.Bounds coverBounds(CoverWhiteBorders.Mode mode){
+  if(mode!=coverMode){
+   var found=CoverWhiteBorders.find(width,height,nativeBitmap::getColor,mode);
+   coverBounds=found.trimmedFrom(width,height)?found:null;
+   coverMode=mode;
+  }
+  return coverBounds;
+ }
+ void drawTrimmedCover(DrawScope scope,float w,float h,CoverWhiteBorders.Bounds bounds)throws Exception{
+  DRAW_IMAGE.invoke(scope,bitmap,pack(bounds.x(),bounds.y()),pack(bounds.width(),bounds.height()),0L,
+   pack(Math.max(1,Math.round(w)),Math.max(1,Math.round(h))),1f,Fill.INSTANCE,null,3);
  }
  void draw(DrawScope scope,float centerX,float centerY,float diameter)throws Exception{drawBitmap(scope,bitmap,width,height,centerX,centerY,diameter);}
  static void drawBitmap(DrawScope scope,ImageBitmap bitmap,int width,int height,float cx,float cy,float diameter)throws Exception{

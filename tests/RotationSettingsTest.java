@@ -64,11 +64,18 @@ public class RotationSettingsTest {
   try(var settings=new DiscSettings(new DiscSettingsTest.Manager(invalid),values::add)){
    check(settings.appearance().equals(new DiscSettings.Appearance(DiscSettings.Style.CD,DiscSettings.VinylColor.BLUE)),"disabled legacy vinyl stays CD and remembers color");
   }
+  var random=DiscSettings.VinylColor.RANDOM;
+  var selected=random.resolve("Album","Album Artist","Singer A",2020,"/music/a.flac",42);
+  check(selected!=random&&selected!=DiscSettings.VinylColor.BLACK,"random selects a preset");
+  check(selected==random.resolve("Album","Album Artist","Singer B",2020,"/music/b.flac",42),
+      "one album keeps its color across tracks and performers");
   javax.swing.SwingUtilities.invokeAndWait(()->{
    var saved=new java.util.concurrent.atomic.AtomicReference<DiscSettings.Appearance>();
    var panel=DiscAppearanceDialog.content(new DiscSettings.Appearance(DiscSettings.Style.CD,DiscSettings.VinylColor.BLUE),value->{saved.set(value);return true;},()->{});
    var blue=button(panel,"海洋蓝");
    var red=button(panel,"玫瑰红");
+   var randomButton=button(panel,"随机色");
+   check(randomButton.getIcon()!=null&&randomButton.getIcon().getIconWidth()==blue.getIcon().getIconWidth(),"random swatch matches preset size");
    var section=blue.getParent().getParent();
    check(!section.isVisible()&&!blue.isEnabled()&&blue.getIcon()!=null&&blue.isSelected(),"color section hidden on CD, ocean blue preselected");
    for(var style:DiscSettings.Style.values()){

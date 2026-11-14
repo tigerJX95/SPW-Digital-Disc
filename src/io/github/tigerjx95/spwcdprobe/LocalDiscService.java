@@ -10,7 +10,6 @@ import java.util.concurrent.*;
 import java.util.function.*;
 import javax.imageio.ImageIO;
 import javax.imageio.ImageReader;
-import javax.imageio.stream.ImageInputStream;
 import static java.nio.file.LinkOption.NOFOLLOW_LINKS;
 /** Read-only, background disc artwork lookup. Publications and drawing share one lock. */
 final class LocalDiscService<T extends AutoCloseable> implements AutoCloseable {
@@ -197,7 +196,11 @@ final class LocalDiscService<T extends AutoCloseable> implements AutoCloseable {
      bytes=in.readNBytes(MAX_BYTES+1);
     }
     if(!stamp.equals(album.stamp(file)))throw new IOException("image changed while decoding");
-    int[] dimensions=dimensions(bytes);T decoded=decoder.decode(bytes,dimensions[0],dimensions[1]);
+    int[] dimensions=dimensions(bytes);
+    synchronized(lock){
+     if(closed||ticket!=generation||!Objects.equals(current,requestedSong)||!Objects.equals(current,song.get()))return true;
+    }
+    T decoded=decoder.decode(bytes,dimensions[0],dimensions[1]);
     if(decoded==null)throw new IOException("decoder returned no image");
     // Do not cache/publish a read that raced with a file replacement.
     try{if(!stamp.equals(album.stamp(file)))throw new IOException("image changed while decoding");}
@@ -225,7 +228,7 @@ final class LocalDiscService<T extends AutoCloseable> implements AutoCloseable {
      if(closed||ticket!=generation||!Objects.equals(current,requestedSong)||!Objects.equals(current,song.get()))return true;
      if(observed!=null){
       rejected.put(file,new Rejected(observed,clock.getAsLong()+REJECT_RETRY_NANOS));
-      while(rejected.size()>candidates.size())rejected.remove(rejected.keySet().iterator().next());
+      trimRejectedLocked();
      }
     }
     diagnostic("LOCAL_CD_REJECTED "+name+" "+failure(e));
@@ -292,11 +295,11 @@ final class LocalDiscService<T extends AutoCloseable> implements AutoCloseable {
   boolean png=true;for(int i=0;i<signature.length;i++)if(bytes[i]!=signature[i])png=false;
   boolean jpeg=(bytes[0]&255)==255&&(bytes[1]&255)==216&&(bytes[2]&255)==255;
   if(!png&&!jpeg)throw new IOException("not PNG or JPEG");
-  try(ImageInputStream stream=new javax.imageio.stream.MemoryCacheImageInputStream(new ByteArrayInputStream(bytes))){
+  try(var stream=new DiscArtwork.ArtworkInput(bytes)){
    var readers=ImageIO.getImageReaders(stream);if(!readers.hasNext())throw new IOException("unsupported PNG/JPEG");
    ImageReader reader=readers.next();
    try{
-    reader.setInput(stream);int width=reader.getWidth(0),height=reader.getHeight(0);
+    reader.setInput(stream,true,true);int width=reader.getWidth(0),height=reader.getHeight(0);
     if(width<1||height<1||width>MAX_DIMENSION||height>MAX_DIMENSION||(long)width*height>MAX_PIXELS)throw new IOException("image dimensions limit");
     return new int[]{width,height};
    }finally{reader.dispose();}
@@ -325,7 +328,17 @@ final class LocalDiscService<T extends AutoCloseable> implements AutoCloseable {
  boolean drawResolved(String currentSong,Draw<T> draw)throws Exception{
   synchronized(lock){
    if(closed||currentSong==null||currentSong.isBlank()||!Objects.equals(currentSong,song.get()))return true;
-   if(asset!=null&&Objects.equals(currentSong,publishedSong)){draw.draw(asset);return true;}
+   if(asset!=null&&Objects.equals(currentSong,publishedSong)){
+    try{draw.draw(asset);return true;}
+    catch(Exception|LinkageError error){
+     Stamp failed=publishedStamp;
+     rejected.put(failed.path(),new Rejected(failed,clock.getAsLong()+REJECT_RETRY_NANOS));
+     trimRejectedLocked();
+     retirePublicationLocked();changed.run();
+     diagnostic("LOCAL_CD_DRAW_ERROR "+failure(error));
+     return false;
+    }
+   }
    return !resolved||!Objects.equals(currentSong,resolvedSong);
   }
  }
@@ -338,6 +351,9 @@ final class LocalDiscService<T extends AutoCloseable> implements AutoCloseable {
  void discard(String currentSong){
   synchronized(lock){if(publishedStamp!=null&&Objects.equals(currentSong,publishedSong)){retirePublicationLocked();changed.run();}}
   diagnostic("LOCAL_CD_DEFAULT image draw failed");
+ }
+ private void trimRejectedLocked(){
+  while(rejected.size()>names.size())rejected.remove(rejected.keySet().iterator().next());
  }
  private void clearLocked(){asset=null;publishedSong=null;publishedStamp=null;}
  private void removeLocked(Iterator<?> iterator,Cached<T> entry){

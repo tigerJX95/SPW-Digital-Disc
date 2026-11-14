@@ -3,7 +3,7 @@ import java.nio.file.*;
 import java.util.jar.Manifest;
 public class PluginSourceMetadataTest {
  public static void main(String[] args)throws Exception{
-  try(var in=Files.newInputStream(Path.of("MANIFEST.MF"))){
+  try(var in=Files.newInputStream(Path.of("plugin/MANIFEST.MF"))){
    var attributes=new Manifest(in).getMainAttributes();
    String url=attributes.getValue("Plugin-Open-Source-Url");
    if(!"https://github.com/tigerJX95/SPW-Digital-Disc".equals(url))throw new AssertionError("host-supported open-source metadata key/value");

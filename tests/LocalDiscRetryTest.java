@@ -31,6 +31,16 @@ public class LocalDiscRetryTest {
     Files.write(primary,green);Files.setLastModifiedTime(primary,FileTime.fromMillis(Files.getLastModifiedTime(primary).toMillis()+3000));
     clock.addAndGet(SECOND);service.poll();
     check(calls.get()==4&&LocalDiscServiceTest.get(service,song)!=first&&first.closed==1,"changed primary bypasses cooldown and regains priority");
+    var failedDraw=LocalDiscServiceTest.get(service,song);
+    check(!service.drawResolved(song,asset->{throw new IOException("draw failed");}),
+        "failed drawing permits default in the same frame");
+    check(failedDraw.closed==1&&service.isResolved(song),"failed artwork retired immediately");
+    clock.addAndGet(SECOND);service.poll();
+    check(calls.get()==5&&"disc.png".equals(service.artworkStatus(song).fileName()),
+        "failed drawing skips unchanged primary during cooldown and selects the next candidate");
+    clock.addAndGet(4*SECOND);service.poll();
+    check(calls.get()==6&&"cd.png".equals(service.artworkStatus(song).fileName()),
+        "primary becomes eligible for retry once the draw cooldown expires");
    }
    for(var asset:made)check(asset.closed==1,"decoded assets close exactly once");
    Files.delete(fallback);clock.set(30*SECOND);calls.set(0);
@@ -51,7 +61,7 @@ public class LocalDiscRetryTest {
     Files.write(primary,red);clock.addAndGet(SECOND);service.poll();
     check(calls.get()==2&&LocalDiscServiceTest.get(service,song).png.getRGB(32,12)==0xffff0000,"replacing oversized file recovers on next normal scan");
    }
-   System.out.println("PASS rejected artwork cooldown: bounded retries, stable fallback, changed-file priority, transient recovery, oversized rejection/replacement and exact disposal");
+   System.out.println("PASS rejected artwork cooldown: bounded decode/draw retries, same-frame fallback, stable replacement, changed-file priority, transient recovery, oversized rejection/replacement and exact disposal");
   }finally{
    try(var paths=Files.walk(dir)){for(Path p:paths.sorted(Comparator.reverseOrder()).toList())Files.deleteIfExists(p);}
   }

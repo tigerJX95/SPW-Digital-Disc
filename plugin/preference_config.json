@@ -72,6 +72,15 @@
           "title": "自定义盘面查找顺序",
           "summary": "拖动四种盘面文件名调整优先级。",
           "on_click": "io.github.tigerjx95.spwcdprobe.DiscOrderDialog.open"
+        },
+        {
+          "type": "list",
+          "key": "cover_white_border_mode",
+          "title": "封面白边裁切",
+          "summary": "仅用于二级展示页。仅裁右侧时，左右两侧均须有连续近白色边缘。",
+          "entries": ["关闭", "自动裁切对边", "仅裁右侧白边"],
+          "entry_values": ["OFF", "PAIRED", "RIGHT"],
+          "default_value": "OFF"
         }
       ]
     }
