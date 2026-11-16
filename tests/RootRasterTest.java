@@ -15,7 +15,7 @@ public class RootRasterTest {
   final BufferedImage bitmap;Graphics2D graphics;final float width,height;
   record Saved(AffineTransform transform,java.awt.Shape clip,Graphics2D parent,BufferedImage layer,float alpha){}
   final ArrayDeque<Saved> saved=new ArrayDeque<>();int circles,sourceCalls;
-  int wordmarkStrokes;
+  int wordmarkStrokes,pathDraws;
   final Map<androidx.compose.ui.graphics.Path,java.awt.geom.Area> masks=new IdentityHashMap<>();
   final Map<androidx.compose.ui.graphics.Path,Path2D.Float> outlines=new IdentityHashMap<>();
   androidx.compose.ui.graphics.Path path(){
@@ -106,6 +106,7 @@ public class RootRasterTest {
       graphics.drawImage(image,dx,dy,dx+dw,dy+dh,sx,sy,sx+sw,sy+sh,null);return null;
      }
      case "drawPath-GBMwjPU"->{
+      pathDraws++;
       var outline=outlines.get(a[0]);
       if(outline==null||!(a[1] instanceof androidx.compose.ui.graphics.SweepGradient brush)||!(a[3] instanceof androidx.compose.ui.graphics.drawscope.Stroke stroke))
        throw new AssertionError("expected vinyl path with sweep shading");
@@ -247,6 +248,7 @@ public class RootRasterTest {
    RootRenderer.paint(sample.scope,1,sample::source,(s,x,y,d)->false,sample::path,1,50,false,null,
        0,DiscSettings.Style.REEL,DiscSettings.VinylColor.BLUE,false,color);
    faceColors.add(sample.bitmap.getRGB(560,210));
+   check(sample.pathDraws==reel.pathDraws,"no extra winding paths on the solid shell: "+color);
    check(sample.bitmap.getRGB(440,338)==reel.bitmap.getRGB(440,338),"preset preserves brown tape");
    check(sample.bitmap.getRGB(420,210)==reel.bitmap.getRGB(420,210),"preset preserves transparent bore");
   }

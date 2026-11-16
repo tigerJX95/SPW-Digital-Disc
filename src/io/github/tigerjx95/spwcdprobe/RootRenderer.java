@@ -110,6 +110,20 @@ final class RootRenderer {
  static void paint(DrawScope scope,float aspect,Source source,Disc disc,Supplier<Path> paths,float exposure,int amount,boolean front,FrontDiscLayer layer,float angle,boolean vinyl,DiscSettings.VinylColor color)throws Exception{
   paint(scope,aspect,source,disc,paths,exposure,amount,front,layer,angle,vinyl,color,false);
  }
+ // Populate the same caches used by the reveal, using the measured size.
+ static void prepareDefaultDisc(DrawScope scope,int amount,float aspect,boolean trimmed,
+      DiscSettings.Style style,DiscSettings.VinylColor vinylColor,DiscSettings.ReelColor reelColor)throws Exception{
+  long size=(Long)SIZE.invoke(scope);
+  float side=Math.min(y(size),x(size)/DiscExposure.widthFactor(amount));
+  if(side<=0||!Float.isFinite(side))return;
+  float radius=(trimmed?Math.min(side,fittedHeight(side,aspect)):side)*.49f;
+  if(style.reel()){
+   reelFinish(radius,SkiaBackedPath_skikoKt::Path,reelColor);
+   ReelWordmark.prepare(style==DiscSettings.Style.REEL);
+  }else if(style!=DiscSettings.Style.CD){
+   vinylFinish(radius,SkiaBackedPath_skikoKt::Path,vinylColor);
+  }else discFinish(radius);
+ }
  static float fittedWidth(float side,float aspect){return side*Math.min(1f,aspect);}
  static float fittedHeight(float side,float aspect){return side/Math.max(1f,aspect);}
  static void paint(DrawScope scope,float aspect,Source source,Disc disc,Supplier<Path> paths,float exposure,int amount,boolean front,FrontDiscLayer layer,float angle,boolean vinyl,DiscSettings.VinylColor color,boolean fitTrimmed)throws Exception{
@@ -285,7 +299,7 @@ final class RootRenderer {
       Stroke tapeLine,Brush tape,Path tapeGrooves,Path tapeEdges,Brush tapeGrooveInk,Brush tapeEdgeInk,Brush hubGlass,Brush glassReflection,Brush glassInnerEdge,Brush tapeSheen,Stroke windowLip,Brush windowShade,
       Brush windowSoftShadow,Brush windowContactShadow,Brush windowHighlight,ReelMark mark,
       Stroke flange,Stroke flangeSeam,Brush flangeMetal,Brush flangeBevel,Brush hubBevel,Brush hubRecess,Brush spindleBevel,
-      Brush solidFace,Brush solidTrim,Path brushedLight,Path brushedDark,Brush grainLight,Brush grainDark,Brush glassBevel,Stroke collarBevel,Stroke reflectionWidth){}
+      Brush solidFace,Brush solidTrim,Brush glassBevel,Stroke collarBevel,Stroke reflectionWidth){}
  private static volatile ReelFinish cachedReel;
  private static ReelFinish reelFinish(float radius,Supplier<Path> paths,DiscSettings.ReelColor color)throws Exception{
   ReelFinish finish=cachedReel;
@@ -365,19 +379,11 @@ final class RootRenderer {
   Brush solidTrim=(Brush)SWEEP.invoke(Brush.Companion,reelStops(metalStops,
       new int[]{tone(color.trim,8),tone(color.trim,-26),tone(color.trim,-12),tone(color.trim,22),
                 tone(color.trim,48),tone(color.trim,32),tone(color.trim,-14),tone(color.trim,8)}),pack(0,0));
-  Path brushedLight=paths.get(),brushedDark=paths.get();
-  if(color.sheen>=35){
-   for(int line=0;line<96;line++){
-    float grainRadius=radius*(.36f+line*.0064f+(line*13%7)*.00022f);
-    Path grain=line%3==0?brushedLight:brushedDark;
-    grain.addOval(new Rect(-grainRadius,-grainRadius,grainRadius,grainRadius),Path.Direction.Clockwise);
-   }
-  }
   // The face overlaps the metal's inner edge (.970r) but stops beneath the opaque flange.
   finish=new ReelFinish(radius,color,oval(paths,radius),oval(paths,radius*.985f),windows,oval(paths,radius*.057f),
       stroke(radius*.009f),stroke(radius*.0024f),tape,tapeGrooves,tapeEdges,reelInk(0x76140c08),reelInk(0x46c99469),hubGlass,glassReflection,glassInnerEdge,tapeSheen,stroke(radius*.036f),windowShade,
       reelInk(0x80100b08),reelInk(0xae080503),reelInk(0x94d7c7b2),reelMark(paths),
-      stroke(radius*.028f),stroke(radius*.038f),flangeMetal,flangeBevel,hubBevel,hubRecess,spindleBevel,solidFace,solidTrim,brushedLight,brushedDark,reelInk(0x0bffffff),reelInk(0x09000000),glassBevel,
+      stroke(radius*.028f),stroke(radius*.038f),flangeMetal,flangeBevel,hubBevel,hubRecess,spindleBevel,solidFace,solidTrim,glassBevel,
       stroke(radius*.020f),stroke(radius*.035f));
   cachedReel=finish;
   return finish;
@@ -520,10 +526,6 @@ final class RootRenderer {
       if(angle!=0f)canvas.rotate(-angle);
       BRUSH_CIRCLE.invoke(scope,reel.solidFace(),radius,center,1f,Fill.INSTANCE,null,3);
      }finally{canvas.restore();}
-     if(color.sheen>=35){
-      BRUSH_PATH.invoke(scope,reel.brushedLight(),reel.grainLight(),1f,reel.tapeLine(),null,3);
-      BRUSH_PATH.invoke(scope,reel.brushedDark(),reel.grainDark(),1f,reel.tapeLine(),null,3);
-     }
     }else circle(scope,0xffff4208,radius,center,Fill.INSTANCE);
     if(artwork!=null&&!artwork.blankDisc()){
      canvas.save();
@@ -608,12 +610,16 @@ final class RootRenderer {
   for(int i=0;i<stops.length;i++)values[i]=new kotlin.Pair<>(stops[i],BOX_COLOR.invoke(null,ColorKt.Color(colors[i])));
   return (Brush)LINEAR.invoke(Brush.Companion,values,pack(-r*.10f,-r*.10f),pack(r*.10f,r*.10f),0);
  }
- private static void finish(DrawScope scope,float r,long center)throws Exception{
+ private static Finish discFinish(float r)throws Exception{
   Finish style=cachedFinish;
   if(style==null||style.radius()!=r){
    float line=Math.max(.6f,Math.min(1.2f,r*.004f));
    cachedFinish=style=new Finish(r,stroke(line),stroke(Math.max(1.2f,Math.min(5f,r*.018f))),hub(r),metal(r),innerLip(r),stroke(r*.005f),stroke(r*.012f));
   }
+  return style;
+ }
+ private static void finish(DrawScope scope,float r,long center)throws Exception{
+  Finish style=discFinish(r);
   float line=style.line().getWidth();
   // White optical edge sits wholly inside the original disc silhouette.
   float edge=style.edge().getWidth();

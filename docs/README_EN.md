@@ -4,7 +4,7 @@
 
 Adds a digital CD presentation to Salt Player (SPW), with a complete album cover and a CD extending from its right side.
 
-Current stable version: **v1.10.0**
+Current stable version: **v1.10.1**
 
 - Added an open-reel tape style with Solid Color and Album Cover options. Both variants have three tape windows and circular lettering on the hub.
 - Solid Color offers six finishes and a Random option that keeps the same color within an album and picks a different color on album changes. The album-cover reel keeps the artwork visible through the glass ring and uses a black inner outline and clipping to keep artwork inside the silver rim.
@@ -212,7 +212,7 @@ If using PowerShell, configure the same environment variables and run this in th
 After the build reports `BUILD SUCCESSFUL`, look in the source directory's `dist` folder for:
 
 ```text
-SPW_Digital_Disc_v1.10.0.spmod
+SPW_Digital_Disc_v1.10.1.spmod
 ```
 
 This is the installation package that SPW can import. You do not need to ZIP the entire source directory or rename its extension. The `build` directory contains intermediate build output, not the installation package.
