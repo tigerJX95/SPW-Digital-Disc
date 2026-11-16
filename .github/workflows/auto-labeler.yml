@@ -3,6 +3,9 @@ name: 自动标记问题反馈渠道
 on:
   issues:
     types: [opened]
+  push:
+    branches: [main]
+    paths: ['.github/workflows/auto-labeler.yml']
 
 jobs:
   label-platform:
@@ -14,28 +17,29 @@ jobs:
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           script: |
-            const body = (context.payload.issue.body ?? '').replace(/\r\n/g, '\n').trimStart();
-            // 只读取 Bug 表单的第一个字段，避免匹配截图说明或问题描述里的文字。
-            const firstField = body.match(/^### ([^\n]+)\n(?:[ \t]*\n)*([^\n]+)/);
-            if (!firstField) return;
-
-            const heading = firstField[1].trim();
-            const answer = firstField[2].trim();
-            if (!answer || answer.startsWith('### ')) return;
-
-            if (heading !== '💻 受影响的平台与渠道 / Affected Platform and Channel') return;
-
             const microsoftStore = { name: 'Windows · Microsoft Store', color: '0366d6' };
-            const steamWindows = { name: 'Windows · Steam', color: '1d76db' };
+            const steamWindows = { name: 'Windows · Steam', color: '7057ff' };
             const steamLinux = { name: 'Linux · Steam', color: '0e8a16' };
             const labelsByAnswer = new Map([
               ['Windows · 微软商店 / Windows · Microsoft Store', microsoftStore],
               ['Windows · Steam', steamWindows],
               ['Linux · Steam', steamLinux],
             ]);
-            const channels = answer.split(',').map(channel => channel.trim());
-            const labels = [...new Set(channels)].map(channel => labelsByAnswer.get(channel));
-            if (labels.some(label => !label)) return;
+            let labels = [...labelsByAnswer.values()];
+            if (context.eventName === 'issues') {
+              const body = (context.payload.issue.body ?? '').replace(/\r\n/g, '\n').trimStart();
+              // 只读取第一个表单字段，兼容旧版下拉选项。
+              const [heading, ...lines] = body.split('\n');
+              if (heading.trim() !== '### 💻 受影响的平台与渠道 / Affected Platform and Channel') return;
+
+              const nextField = lines.findIndex(line => line.startsWith('### '));
+              const answer = (nextField === -1 ? lines : lines.slice(0, nextField)).join('\n').trim();
+              const channels = /^- \[[ xX]\]/m.test(answer)
+                ? [...answer.matchAll(/^- \[[xX]\][ \t]+(.+)$/gm)].map(match => match[1].trim())
+                : answer.split(',').map(channel => channel.trim());
+              labels = [...new Set(channels)].map(channel => labelsByAnswer.get(channel));
+              if (!labels.length || labels.some(label => !label)) return;
+            }
 
             const repository = context.repo;
             const issues = github.rest.issues;
@@ -43,7 +47,10 @@ jobs:
               const lookup = { ...repository, name: label.name };
               // 首次使用时创建标签。并行提交可能已创建同名标签。
               try {
-                await issues.getLabel(lookup);
+                const { data: existing } = await issues.getLabel(lookup);
+                if (existing.color !== label.color) {
+                  await issues.updateLabel({ ...lookup, color: label.color });
+                }
               } catch (error) {
                 if (error.status !== 404) throw error;
                 try {
@@ -55,6 +62,7 @@ jobs:
               }
             }
 
+            if (context.eventName !== 'issues') return;
             await issues.addLabels({
               ...repository,
               issue_number: context.issue.number,
