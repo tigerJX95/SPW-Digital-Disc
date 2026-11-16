@@ -11,15 +11,14 @@ body:
     attributes:
       label: 💻 受影响的平台与渠道 / Affected Platform and Channel
       description: |
-        请选择已确认受影响的环境。三个渠道均可复现时，选择最后一项。
+        请选择所有已确认能复现问题的平台与渠道，可多选。
 
-        Select an environment where you reproduced the issue. Select the last option if it affects all three.
-      multiple: false
+        Select all platforms and channels where you reproduced the issue.
+      multiple: true
       options:
         - Windows · 微软商店 / Windows · Microsoft Store
         - Windows · Steam
         - Linux · Steam
-        - 三个渠道均受影响 / All three channels
     validations:
       required: true
 
@@ -38,7 +37,7 @@ body:
   - type: checkboxes
     id: checklist
     attributes:
-      label: ☑️ 提交前确认 / Before You Submit
+      label: 提交前确认 / Before You Submit
       options:
         - label: 我已查看项目说明，并搜索过已有议题。 / I have read the project documentation and searched existing issues.
           required: true

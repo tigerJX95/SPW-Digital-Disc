@@ -6,7 +6,7 @@ public class FrontSettingsTest {
  static void check(boolean b,String why){if(!b)throw new AssertionError(why);}
  public static void main(String[] args)throws Exception{
   Path file=Files.createTempDirectory("front-settings").resolve("config.json");
-  var helper=DiscSettingsTest.helper(file);var manager=new DiscSettingsTest.Manager(helper);
+  var helper=DiscSettingsTest.helper(file);var manager=new DiscSettingsTest.Manager(file,helper);
   var values=new ArrayList<DiscSettings.Values>();
   try(DiscSettings settings=new DiscSettings(manager,values::add)){
    check(values.equals(List.of(DiscSettings.DEFAULT)),"existing profile stays default-back without a front key");
@@ -20,7 +20,7 @@ public class FrontSettingsTest {
    helper.set(DiscSettings.FRONT_KEY,false);manager.fire();DiscSettingsTest.flush();
    check(values.get(values.size()-1).equals(new DiscSettings.Values(50,false,false,false)),"front toggle does not change exposure");
   }
-  var restored=new DiscSettingsTest.Manager(DiscSettingsTest.helper(file));var restart=new ArrayList<DiscSettings.Values>();
+  var restored=new DiscSettingsTest.Manager(file,DiscSettingsTest.helper(file));var restart=new ArrayList<DiscSettings.Values>();
   try(DiscSettings settings=new DiscSettings(restored,restart::add)){
    check(restart.equals(List.of(new DiscSettings.Values(50,true,false,false))),"saved amount and front mode restored together");
   }

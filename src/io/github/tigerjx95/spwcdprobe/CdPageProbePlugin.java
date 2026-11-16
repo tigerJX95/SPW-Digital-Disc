@@ -33,6 +33,7 @@ public final class CdPageProbePlugin extends SpwPlugin {
  private volatile boolean running;
  private javax.swing.Timer sourceObserver,animationClock;
  private final MutableState<Long> sourceRevision=state(0L);
+ private final DiscSettings.ReelRandom reelRandom=new DiscSettings.ReelRandom();
  private final int vinylColorSalt=java.util.concurrent.ThreadLocalRandom.current().nextInt();
  private final MutableState<Long> discRevision=state(0L);
  private LocalDiscService<DiscImage> localDiscs;
@@ -281,7 +282,7 @@ public final class CdPageProbePlugin extends SpwPlugin {
    // layout nodes must not be traversed by the local-image decode worker.
    sourceObserver=new javax.swing.Timer(100,event->observeSources());sourceObserver.start();
    animationClock=new javax.swing.Timer(16,event->animateFrames());animationClock.setCoalesce(true);animationClock.start();
-   report("START 1.9.0 Host Binding; retained pixels are not readiness; hooks="+handles.size());
+   report("START 1.10.0 Host Binding; retained pixels are not readiness; hooks="+handles.size());
   }catch(Throwable e){stop();throw new IllegalStateException("SelfDraw startup failed",e);}
  }
  @SuppressWarnings("unchecked")
@@ -388,6 +389,9 @@ public final class CdPageProbePlugin extends SpwPlugin {
         catch(Exception error){report("LOCAL_CD_DRAW_ERROR "+error.getClass().getSimpleName());return true;}
        };
        var vinylColor=resolveVinylColor(display.vinylColor(),drawSong);
+       var selectedReelColor=display.appearance().reelColor();
+       var reelColor=display.appearance().style()==DiscSettings.Style.REEL&&selectedReelColor==DiscSettings.ReelColor.RANDOM
+         ?reelRandom.resolve(currentAlbumKey(drawSong)):selectedReelColor;
        var canvas=scope.getDrawContext().getCanvas();canvas.save();
        try{
         float travel=DiscExposure.fraction(amount)*.5f;
@@ -400,16 +404,20 @@ public final class CdPageProbePlugin extends SpwPlugin {
         var bounds=cover==null||display.trimCover()==CoverWhiteBorders.Mode.OFF?null:cover.coverBounds(display.trimCover());
         boolean trim=bounds!=null;
         float aspect=cover==null?1f:trim?bounds.displayAspect():cover.aspect();
-        RootRenderer.Source source=cover==null?null:trim?(target,w,h)->cover.drawTrimmedCover(target,w,h,bounds):cover::drawCover;
+        RootRenderer.Source source=cover==null?null:new RootRenderer.Source(){
+         public void draw(androidx.compose.ui.graphics.drawscope.DrawScope target,float w,float h)throws Exception{
+          if(trim)cover.drawTrimmedCover(target,w,h,bounds);else cover.drawCover(target,w,h);
+         }
+        };
         float exposed=selected.exposed();
-        if(cover!=null)RootRenderer.paint(scope,aspect,source,disc,androidx.compose.ui.graphics.SkiaBackedPath_skikoKt::Path,exposed,amount,front,frame.frontDiscLayer,angle,display.vinyl(),vinylColor,trim);
-        else RootRenderer.draw(scope,painter,()->rawSource.set(true),()->rawSource.remove(),disc,exposed,amount,front,frame.frontDiscLayer,angle,frame.fallbackActive,display.vinyl(),vinylColor);
+        if(cover!=null)RootRenderer.paint(scope,aspect,source,disc,androidx.compose.ui.graphics.SkiaBackedPath_skikoKt::Path,exposed,amount,front,frame.frontDiscLayer,angle,display.appearance().style(),vinylColor,trim,reelColor);
+        else RootRenderer.draw(scope,painter,()->rawSource.set(true),()->rawSource.remove(),disc,exposed,amount,front,frame.frontDiscLayer,angle,frame.fallbackActive,display.appearance().style(),vinylColor,reelColor);
         float gap=4*density.getDensity(),reflectedHeight=plan.height()-plan.side()-gap;
         if(reflectedHeight>0){
          if(frame.reflection==null)frame.reflection=new ReflectionRenderer();
          try{frame.reflection.draw(scope,plan.side(),plan.width(),reflectedHeight,gap,()->{
-          if(cover!=null)RootRenderer.paint(scope,aspect,source,disc,androidx.compose.ui.graphics.SkiaBackedPath_skikoKt::Path,exposed,amount,front,frame.frontDiscLayer,angle,display.vinyl(),vinylColor,trim);
-          else RootRenderer.draw(scope,painter,()->rawSource.set(true),()->rawSource.remove(),disc,exposed,amount,front,frame.frontDiscLayer,angle,frame.fallbackActive,display.vinyl(),vinylColor);
+          if(cover!=null)RootRenderer.paint(scope,aspect,source,disc,androidx.compose.ui.graphics.SkiaBackedPath_skikoKt::Path,exposed,amount,front,frame.frontDiscLayer,angle,display.appearance().style(),vinylColor,trim,reelColor);
+          else RootRenderer.draw(scope,painter,()->rawSource.set(true),()->rawSource.remove(),disc,exposed,amount,front,frame.frontDiscLayer,angle,frame.fallbackActive,display.appearance().style(),vinylColor,reelColor);
          });}
          catch(Exception error){report("REFLECTION_ERROR "+error.getClass().getSimpleName());}
         }
@@ -441,6 +449,7 @@ public final class CdPageProbePlugin extends SpwPlugin {
    if(!artwork.resolved())return "正在查找盘面图片…";
    if(artwork.fileName()!=null)return "使用自定义图片 "+artwork.fileName();
    var display=displaySettings.getValue();
+   if(display.appearance().style().reel())return display.appearance().style().label;
    String style=!display.vinyl()?"CD":display.vinylColor()==DiscSettings.VinylColor.BLACK?"黑胶":display.vinylColor()==DiscSettings.VinylColor.RANDOM?"随机色彩胶":display.vinylColor().label+"彩胶";
    if(coverAvailability.missing(song))return "无可用图片，显示空白 "+style;
    if(coverAvailability.available(song))return "由专辑封面生成（"+style+" 样式）";
@@ -511,6 +520,14 @@ public final class CdPageProbePlugin extends SpwPlugin {
   // Publish that observation too, so a suppressed cached native layer cannot
   // leave the parent Canvas waiting for a change the observer already missed.
   if(sourceChanged)sourceRevision.setValue(sourceRevision.getValue()+1);
+ }
+ private DiscSettings.AlbumKey currentAlbumKey(String song){
+  try{
+   var item=WorkshopApi.playback().getCurrentMediaItem();
+   if(item!=null&&Objects.equals(song,item.getPath()))
+    return DiscSettings.AlbumKey.of(item.getAlbum(),item.getAlbumArtist(),item.getArtist(),item.getYear(),song);
+  }catch(RuntimeException|LinkageError unavailable){ /* Fall back to the current path. */ }
+  return DiscSettings.AlbumKey.of(null,null,null,0,song);
  }
  private DiscSettings.VinylColor resolveVinylColor(DiscSettings.VinylColor color,String song){
   if(color!=DiscSettings.VinylColor.RANDOM)return color;

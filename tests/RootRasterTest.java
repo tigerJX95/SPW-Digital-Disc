@@ -15,6 +15,7 @@ public class RootRasterTest {
   final BufferedImage bitmap;Graphics2D graphics;final float width,height;
   record Saved(AffineTransform transform,java.awt.Shape clip,Graphics2D parent,BufferedImage layer,float alpha){}
   final ArrayDeque<Saved> saved=new ArrayDeque<>();int circles,sourceCalls;
+  int wordmarkStrokes;
   final Map<androidx.compose.ui.graphics.Path,java.awt.geom.Area> masks=new IdentityHashMap<>();
   final Map<androidx.compose.ui.graphics.Path,Path2D.Float> outlines=new IdentityHashMap<>();
   androidx.compose.ui.graphics.Path path(){
@@ -25,6 +26,20 @@ public class RootRasterTest {
      var r=(androidx.compose.ui.geometry.Rect)a[0];
      var ellipse=new Ellipse2D.Float(r.getLeft(),r.getTop(),r.getWidth(),r.getHeight());
      area.add(new java.awt.geom.Area(ellipse));outline.append(ellipse,false);return null;
+    }
+    switch(m.getName()){
+     case "moveTo"->{outline.moveTo((Float)a[0],(Float)a[1]);return null;}
+     case "lineTo"->{outline.lineTo((Float)a[0],(Float)a[1]);return null;}
+     case "quadraticTo"->{outline.quadTo((Float)a[0],(Float)a[1],(Float)a[2],(Float)a[3]);return null;}
+     case "cubicTo"->{outline.curveTo((Float)a[0],(Float)a[1],(Float)a[2],(Float)a[3],(Float)a[4],(Float)a[5]);return null;}
+    }
+    if(m.getName().equals("arcTo")){
+     var r=(androidx.compose.ui.geometry.Rect)a[0];
+     var arc=new Arc2D.Float(r.getLeft(),r.getTop(),r.getWidth(),r.getHeight(),-(Float)a[1],-(Float)a[2],Arc2D.OPEN);
+     outline.append(arc,!(Boolean)a[3]);return null;
+    }
+    if(m.getName().equals("close")){
+     outline.closePath();area.add(new java.awt.geom.Area(outline));return null;
     }
     throw new AssertionError(m);
    });
@@ -94,13 +109,17 @@ public class RootRasterTest {
       var outline=outlines.get(a[0]);
       if(outline==null||!(a[1] instanceof androidx.compose.ui.graphics.SweepGradient brush)||!(a[3] instanceof androidx.compose.ui.graphics.drawscope.Stroke stroke))
        throw new AssertionError("expected vinyl path with sweep shading");
+      if(stroke.getWidth()==.076f||stroke.getWidth()==.125f)wordmarkStrokes++;
       sweep(brush,new BasicStroke(stroke.getWidth()).createStrokedShape(outline));return null;
      }
      case "drawCircle-V9BoPsw"->{
       circles++;
       if(a[0] instanceof androidx.compose.ui.graphics.SweepGradient brush){
        float r=(Float)a[1];
-       sweep(brush,new Ellipse2D.Float(-r,-r,2*r,2*r));return null;
+       Shape shape=new Ellipse2D.Float(-r,-r,2*r,2*r);
+       if(a[4] instanceof androidx.compose.ui.graphics.drawscope.Stroke stroke)
+        shape=new BasicStroke(stroke.getWidth()).createStrokedShape(shape);
+       sweep(brush,shape);return null;
       }
       if(a[0] instanceof androidx.compose.ui.graphics.LinearGradient brush){
        long start=(Long)brush.getClass().getMethod("getStart-F1C5BW0$ui_graphics").invoke(brush),end=(Long)brush.getClass().getMethod("getEnd-F1C5BW0$ui_graphics").invoke(brush);
@@ -196,6 +215,44 @@ public class RootRasterTest {
    check(p.top()>=0&&p.top()+p.height()<=window[1]-90*density,"playback controls outside widget");
    cases++;
   }
+  Raster reel=new Raster(630,420);
+  RootRenderer.paint(reel.scope,1,reel::source,(s,x,y,d)->false,reel::path,1,50,false,null,
+      0,DiscSettings.Style.REEL,DiscSettings.VinylColor.BLUE,false);
+  Raster turned=new Raster(630,420);
+  turned.masks.putAll(reel.masks);
+  turned.outlines.putAll(reel.outlines);
+  RootRenderer.paint(turned.scope,1,turned::source,(s,x,y,d)->false,turned::path,1,50,false,null,
+      45,DiscSettings.Style.REEL,DiscSettings.VinylColor.BLUE,false);
+  check(reel.saved.isEmpty()&&turned.saved.isEmpty(),"reel restores canvas state");
+  check(reel.sourceCalls==1,"reel draws the album cover once");
+  check(reel.bitmap.getRGB(440,338)!=turned.bitmap.getRGB(440,338),"reel openings rotate with playback");
+  ImageIO.write(reel.bitmap,"png",Path.of(args[0]).resolveSibling("ReelDefault.png").toFile());
+  Raster artwork=new Raster(630,420);
+  artwork.masks.putAll(reel.masks);
+  artwork.outlines.putAll(reel.outlines);
+  RootRenderer.paint(artwork.scope,1,artwork::source,(s,x,y,d)->false,artwork::path,1,50,false,null,
+      0,DiscSettings.Style.REEL_COVER,DiscSettings.VinylColor.BLUE,false);
+  check(artwork.sourceCalls==2&&artwork.saved.isEmpty(),"cover reel paints artwork and restores canvas");
+  check(reel.bitmap.getRGB(440,338)==artwork.bitmap.getRGB(440,338),"artwork leaves the tape window visible");
+  check(reel.bitmap.getRGB(560,210)!=artwork.bitmap.getRGB(560,210),"artwork replaces the default solid face");
+  check(reel.bitmap.getRGB(470,210)!=artwork.bitmap.getRGB(470,210),
+      "translucent hub glass reveals the face beneath it");
+  check(reel.bitmap.getRGB(446,210)==0xff232326,
+      "solid reel uses a flat opaque black hub without a spindle collar");
+  var faceColors=new java.util.HashSet<Integer>();
+  for(var color:DiscSettings.ReelColor.PALETTE){
+   Raster sample=new Raster(630,420);
+   sample.masks.putAll(reel.masks);
+   sample.outlines.putAll(reel.outlines);
+   RootRenderer.paint(sample.scope,1,sample::source,(s,x,y,d)->false,sample::path,1,50,false,null,
+       0,DiscSettings.Style.REEL,DiscSettings.VinylColor.BLUE,false,color);
+   faceColors.add(sample.bitmap.getRGB(560,210));
+   check(sample.bitmap.getRGB(440,338)==reel.bitmap.getRGB(440,338),"preset preserves brown tape");
+   check(sample.bitmap.getRGB(420,210)==reel.bitmap.getRGB(420,210),"preset preserves transparent bore");
+  }
+  check(faceColors.size()==6,"all six reel finishes draw distinct face colors");
+  check(reel.wordmarkStrokes==4,"solid reel draws both wordmarks");
+  check(artwork.wordmarkStrokes==2,"cover reel draws only the hub wordmark");
   SelfDrawLayout first=SelfDrawLayout.fit(1673,930,1,false),second=SelfDrawLayout.fit(1673,930,1,true);
   check(second.side()>first.side(),"secondary cover larger than primary");
   System.out.println("PASS "+cases+" raster/layout cases: all four source corners, circular CD edge beyond old square, Canvas width=1.5 cover widths, bounds and controls");

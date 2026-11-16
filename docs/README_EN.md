@@ -4,15 +4,11 @@
 
 Adds a digital CD presentation to Salt Player (SPW), with a complete album cover and a CD extending from its right side.
 
-Current stable version: **v1.9.0**
+Current stable version: **v1.10.0**
 
-- Random Color for Colored Vinyl selects from the six presets and keeps the same color for an album during the current session.
-- Custom disc image dimension checks read the loaded bytes directly to reduce copying. Stale requests stop before full decoding.
-- If a custom disc image fails to draw, the default disc appears in the same frame. Lookup temporarily skips the failed image and tries other candidates. Replacing the image allows it to load again.
-- Fixed an abrupt cutoff near the end of disc retraction in front mode.
-- Cover Border Trimming is off by default. Choose paired horizontal or vertical borders, or trim only the disc-side strip when both the left and right edges have continuous near-white borders.
-
-  Trimming affects only the secondary display and leaves the original artwork file intact. Stretching a heavily cropped image to fill a square can distort people in the cover art, so the plugin uses the cropped aspect ratio when the result is substantially wider or taller than a square. Trimming checks the color of edge pixels. Top and bottom borders must match. If text or other details interrupt a border, both edges are preserved. This feature detects only white or near-white edges. Red, black, and other borders are preserved because they may be part of the original composition. A white border may also be retained if it has a noticeable color cast, marks, or text and artwork extending to the edge. For a square cover that preserves the original proportions and composition, we recommend using an AI image tool to extend the background, then setting the result as the album cover.
+- Added an open-reel tape style with Solid Color and Album Cover options. Both variants have three tape windows and circular lettering on the hub.
+- Solid Color offers six finishes and a Random option that keeps the same color within an album and picks a different color on album changes. The album-cover reel keeps the artwork visible through the glass ring and uses a black inner outline and clipping to keep artwork inside the silver rim.
+- Fixed an issue where adjusting disc exposure could reset the selected default style to Album Cover CD.
 
 [Update history](CHANGELOG.md) (Chinese)
 
@@ -32,6 +28,10 @@ I wanted to bring this digital record experience to Salt Player: enjoying the co
 - **Secondary display page**: clicking the album cover opens a larger, centered presentation of the complete cover and a CD on its right. The cover is not squeezed into half an image.
 - **Custom disc artwork**: searches the current song's directory in the default order below or the order set in plugin preferences. If a higher-priority file cannot be decoded, the next file is tried.
 - **Generated disc artwork**: when custom artwork is unavailable, a copy of the album cover fills a circular CD with a narrow white edge, translucent annular hub, translucent center hole and tiny white spindle. Two narrow silver bevels use adjacent highlights and grooves around a translucent hub field, preserving the artwork underneath; the main cover remains complete.
+- **Open-reel tape**: choose Open-Reel Tape under Default Disc Style, then select Solid Color or Album Cover. Solid Color offers Brushed Silver, Champagne Gold, Vibrant Orange, Ivory White, Graphite Gray, Deep Wine Red, and Random, with Brushed Silver selected by default. The random color stays the same within an album and changes when switching albums. Available custom disc artwork takes priority.
+- Cover Border Trimming is off by default. Choose paired horizontal or vertical borders, or trim only the disc-side strip when both the left and right edges have continuous near-white borders.
+
+  Trimming affects only the secondary display and leaves the original artwork file intact. Stretching a heavily cropped image to fill a square can distort people in the cover art, so the plugin uses the cropped aspect ratio when the result is substantially wider or taller than a square. Trimming checks the color of edge pixels. Top and bottom borders must match. If text or other details interrupt a border, both edges are preserved. This feature detects only white or near-white edges. Red, black, and other borders are preserved because they may be part of the original composition. A white border may also be retained if it has a noticeable color cast, marks, or text and artwork extending to the edge. For a square cover that preserves the original proportions and composition, we recommend using an AI image tool to extend the background, then setting the result as the album cover.
 - **Transparent images**: custom PNG files retain their existing transparent backgrounds and center holes. An antialiased circular outer mask is applied. No extra center hole or hub ring is added.
 - **Front-disc display**: enable the native plugin switch to draw the disc over the cover. Off by default. Front mode uses whole-disc motion with a short uniform fade. Compare at exposure 50; in front mode exposure controls horizontal travel, while 0 still shows only the cover.
 - **Disc exposure setting**: open SPW Digital Disc settings in the plugin manager and adjust 0–100. Default 50 preserves the existing view; 100 shows the full disc. The host saves the value. The group fits the window, and cover-only mode returns without a retract delay.
@@ -47,7 +47,7 @@ https://github.com/user-attachments/assets/8a289172-d79b-4e2e-9ba2-c7dc9ee5d86c
 
 ## Installation and use
 
-**V1.8.0** passed real-world testing with the Microsoft Store edition of SPW and the Steam edition on Windows and Ubuntu 26.04.1 LTS (Linux). Interface mappings cover SPW 1.19.0 and 1.19.3 from the Microsoft Store. The plugin uses SPW's internal drawing interfaces, so later SPW versions may require compatibility updates.
+**v1.10.0** was tested successfully with SPW on Windows (Microsoft Store and Steam) and Linux (Steam). Interface mappings cover SPW 1.19.0 and 1.19.3 from the Microsoft Store. The plugin uses SPW's internal drawing interfaces, so later SPW versions may require compatibility updates.
 
 1. Obtain the compiled `.spmod` file. The source ZIP cannot be installed directly; see the build instructions below to compile it yourself.
 2. In SPW's plugin manager, use the local plugin import option to select the `.spmod` file.
@@ -212,7 +212,7 @@ If using PowerShell, configure the same environment variables and run this in th
 After the build reports `BUILD SUCCESSFUL`, look in the source directory's `dist` folder for:
 
 ```text
-SPW_Digital_Disc_v1.9.0.spmod
+SPW_Digital_Disc_v1.10.0.spmod
 ```
 
 This is the installation package that SPW can import. You do not need to ZIP the entire source directory or rename its extension. The `build` directory contains intermediate build output, not the installation package.

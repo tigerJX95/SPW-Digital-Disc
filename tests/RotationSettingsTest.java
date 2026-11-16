@@ -28,7 +28,7 @@ public class RotationSettingsTest {
  }
  public static void main(String[] args)throws Exception{
   Path file=Files.createTempDirectory("rotation-settings").resolve("config.json");
-  var helper=DiscSettingsTest.helper(file);var manager=new DiscSettingsTest.Manager(helper);
+  var helper=DiscSettingsTest.helper(file);var manager=new DiscSettingsTest.Manager(file,helper);
   var values=new ArrayList<DiscSettings.Values>();
   try(var settings=new DiscSettings(manager,values::add)){
    check(!values.getLast().rotate(),"old profile rotation off");
@@ -49,19 +49,23 @@ public class RotationSettingsTest {
    check(values.getLast().vinylColor()==DiscSettings.VinylColor.BLACK,"classic vinyl always renders black");
    check(helper.save(),"save using host storage");
   }
-  try(var settings=new DiscSettings(new DiscSettingsTest.Manager(DiscSettingsTest.helper(file)),values::add)){
+  try(var settings=new DiscSettings(new DiscSettingsTest.Manager(file,DiscSettingsTest.helper(file)),values::add)){
    check(settings.appearance().equals(new DiscSettings.Appearance(DiscSettings.Style.BLACK_VINYL,DiscSettings.VinylColor.PINK))
      &&values.getLast().motionSpeed()==DiscSettings.Speed.FAST&&values.getLast().rotationSpeed()==DiscSettings.Speed.SLOW,"restart restores color, both speeds and vinyl");
   }
+  Files.delete(file.resolveSibling(DiscSettings.APPEARANCE_CONFIG));
   var invalid=DiscSettingsTest.helper(file);
   invalid.set(DiscSettings.STYLE_KEY,"bad");
   invalid.set(DiscSettings.VINYL_COLOR_KEY,"INVALID");
-  try(var settings=new DiscSettings(new DiscSettingsTest.Manager(invalid),values::add)){
+  try(var settings=new DiscSettings(new DiscSettingsTest.Manager(file,invalid),values::add)){
    check(values.getLast().vinyl()&&values.getLast().vinylColor()==DiscSettings.VinylColor.BLACK,"invalid color preserves black vinyl fallback");
+   check(DiscSettingsTest.helper(file.resolveSibling(DiscSettings.APPEARANCE_CONFIG))
+       .get(DiscSettings.STYLE_KEY,"").equals("BLACK_VINYL:BLUE"),"legacy vinyl is migrated to separate storage");
   }
+  Files.delete(file.resolveSibling(DiscSettings.APPEARANCE_CONFIG));
   invalid.set(DiscSettings.VINYL_KEY,false);
   invalid.set(DiscSettings.VINYL_COLOR_KEY,"BLUE");
-  try(var settings=new DiscSettings(new DiscSettingsTest.Manager(invalid),values::add)){
+  try(var settings=new DiscSettings(new DiscSettingsTest.Manager(file,invalid),values::add)){
    check(settings.appearance().equals(new DiscSettings.Appearance(DiscSettings.Style.CD,DiscSettings.VinylColor.BLUE)),"disabled legacy vinyl stays CD and remembers color");
   }
   var random=DiscSettings.VinylColor.RANDOM;
@@ -79,6 +83,7 @@ public class RotationSettingsTest {
    var section=blue.getParent().getParent();
    check(!section.isVisible()&&!blue.isEnabled()&&blue.getIcon()!=null&&blue.isSelected(),"color section hidden on CD, ocean blue preselected");
    for(var style:DiscSettings.Style.values()){
+    if(style==DiscSettings.Style.REEL_COVER)continue;
     var option=button(panel,style.label);
     var insets=option.getInsets();
     int textWidth=option.getFontMetrics(option.getFont()).stringWidth(style.label);
@@ -95,6 +100,28 @@ public class RotationSettingsTest {
    check(red.isSelected()&&saved.get()==null,"draft color retained across style switches");
    button(panel,"确认").doClick();
    check(saved.get().equals(new DiscSettings.Appearance(DiscSettings.Style.COLORED_VINYL,DiscSettings.VinylColor.RED)),"confirmation saves the selected appearance");
+   button(panel,"开盘磁带").doClick();
+   var artwork=button(panel,"专辑封面");
+   check(artwork.getParent().isVisible()&&!section.isVisible(),"reel shows its own appearance choices");
+   var silver=button(panel,"拉丝银");
+   var reelPalette=silver.getParent();
+   check(reelPalette.isVisible()&&silver.isSelected()&&reelPalette.getComponentCount()==7,
+       "solid reel shows six presets and random with silver selected by default");
+   var reelLabels=java.util.Arrays.stream(reelPalette.getComponents())
+       .map(component->((javax.swing.JToggleButton)component).getText()).toList();
+   check(reelLabels.equals(java.util.List.of("拉丝银","香槟金","活力橙","象牙白","石墨灰","深酒红","随机色")),
+       "reel palette starts with silver and gold and ends with random");
+   button(panel,"深酒红").doClick();
+   artwork.doClick();
+   check(!reelPalette.isVisible(),"album-cover reel hides solid color controls");
+   button(panel,"纯色").doClick();
+   check(reelPalette.isVisible()&&button(panel,"深酒红").isSelected(),"return to solid retains chosen color");
+   button(panel,"确认").doClick();
+   check(saved.get().style()==DiscSettings.Style.REEL&&saved.get().reelColor()==DiscSettings.ReelColor.WINE,
+       "confirmation saves the selected reel color");
+   artwork.doClick();
+   button(panel,"确认").doClick();
+   check(saved.get().style()==DiscSettings.Style.REEL_COVER,"reel artwork choice reaches settings");
   });
   var reader=new PlaybackStateReader();
   var verify=PlaybackStateReader.class.getDeclaredMethod("verifyHost");verify.setAccessible(true);verify.invoke(reader);

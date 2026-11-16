@@ -59,22 +59,50 @@ public final class DiscAppearanceDialog implements AutoCloseable {
   var colorSection=new JPanel(new BorderLayout(0,8));
   colorSection.setOpaque(false);
   colorSection.setBorder(BorderFactory.createEmptyBorder(14,0,0,0));
-  colorSection.getAccessibleContext().setAccessibleName("彩胶颜色");
+  colorSection.getAccessibleContext().setAccessibleName("盘面颜色");
+  var reelOptions=new ButtonGroup();
+  var reelColors=new ButtonGroup();
+  var reelPalette=new JPanel(new GridLayout(0,3,8,8));
+  reelPalette.setOpaque(false);
+  reelPalette.setBorder(BorderFactory.createEmptyBorder(8,0,0,0));
+  reelPalette.getAccessibleContext().setAccessibleName("卷盘颜色");
+  for(var color:DiscSettings.ReelColor.values()){
+   var button=option(color.label,color.name(),reelColors,color==initial.reelColor(),
+     color==DiscSettings.ReelColor.RANDOM?null:new Color(color.rgb));
+   if(color==DiscSettings.ReelColor.RANDOM){
+    var icon=new RandomSwatch(DiscSettings.ReelColor.PALETTE.stream().mapToInt(entry->entry.rgb).toArray());
+    button.setIcon(icon);
+    button.setDisabledIcon(icon);
+   }
+   reelPalette.add(button);
+  }
+  var reelSection=new JPanel(new GridLayout(1,2,8,0));
+  reelSection.setOpaque(false);
+  reelSection.setBorder(BorderFactory.createEmptyBorder(14,0,0,0));
+  reelSection.getAccessibleContext().setAccessibleName("卷盘外观");
+  reelSection.add(option("纯色",DiscSettings.Style.REEL.name(),reelOptions,
+      initial.style()!=DiscSettings.Style.REEL_COVER,null));
+  reelSection.add(option("专辑封面",DiscSettings.Style.REEL_COVER.name(),reelOptions,
+      initial.style()==DiscSettings.Style.REEL_COVER,null));
   Runnable refresh=()->{
    var style=DiscSettings.Style.valueOf(styles.getSelection().getActionCommand());
    boolean enabled=style==DiscSettings.Style.COLORED_VINYL;
    for(var button:colorButtons)button.setEnabled(enabled);
    status.setText("当前选择："+DiscSettings.VinylColor.valueOf(colors.getSelection().getActionCommand()).label);
-   if(colorSection.isVisible()!=enabled){
+   boolean showReelPalette=style.reel()&&reelOptions.getSelection().getActionCommand().equals(DiscSettings.Style.REEL.name());
+   if(colorSection.isVisible()!=enabled||reelSection.isVisible()!=style.reel()||reelPalette.isVisible()!=showReelPalette){
+    reelPalette.setVisible(showReelPalette);
+    reelSection.setVisible(style.reel());
     colorSection.setVisible(enabled);
     var dialog=SwingUtilities.getWindowAncestor(panel);
     if(dialog!=null)dialog.pack();
    }
   };
-  var styleRow=new JPanel(new GridLayout(1,3,8,0));
+  var styleRow=new JPanel(new GridLayout(1,4,8,0));
   styleRow.setOpaque(false);
   for(var style:DiscSettings.Style.values()){
-   var button=option(style.label,style.name(),styles,style==initial.style(),null);
+   if(style==DiscSettings.Style.REEL_COVER)continue;
+   var button=option(style.label,style.name(),styles,style==initial.style()||style.reel()&&initial.style().reel(),null);
    var size=button.getPreferredSize();
    var insets=button.getInsets();
    int textWidth=button.getFontMetrics(button.getFont()).stringWidth(style.label);
@@ -95,6 +123,9 @@ public final class DiscAppearanceDialog implements AutoCloseable {
   colorSection.add(palette,BorderLayout.CENTER);
   colorSection.add(status,BorderLayout.SOUTH);
   fields.add(colorSection);
+  fields.add(reelSection);
+  fields.add(reelPalette);
+  for(var button:reelSection.getComponents())((JToggleButton)button).addActionListener(event->refresh.run());
   panel.add(fields,BorderLayout.CENTER);
   refresh.run();
 
@@ -106,7 +137,9 @@ public final class DiscAppearanceDialog implements AutoCloseable {
   confirm.addActionListener(event->{
    var style=DiscSettings.Style.valueOf(styles.getSelection().getActionCommand());
    var color=DiscSettings.VinylColor.valueOf(colors.getSelection().getActionCommand());
-   if(save.test(new DiscSettings.Appearance(style,color)))close.run();
+   if(style.reel())style=DiscSettings.Style.valueOf(reelOptions.getSelection().getActionCommand());
+   var reelColor=DiscSettings.ReelColor.valueOf(reelColors.getSelection().getActionCommand());
+   if(save.test(new DiscSettings.Appearance(style,color,reelColor)))close.run();
    else JOptionPane.showMessageDialog(panel,"无法保存默认盘面样式。","保存失败",JOptionPane.ERROR_MESSAGE);
   });
   actions.add(cancel);
@@ -142,7 +175,9 @@ public final class DiscAppearanceDialog implements AutoCloseable {
    button.setIconTextGap(8);
   }
   if(command.equals(DiscSettings.VinylColor.RANDOM.name())){
-   var icon=new RandomSwatch();
+   var icon=new RandomSwatch(java.util.Arrays.stream(DiscSettings.VinylColor.values())
+     .filter(color->color!=DiscSettings.VinylColor.BLACK&&color!=DiscSettings.VinylColor.RANDOM)
+     .mapToInt(color->color.shade(85)).toArray());
    button.setIcon(icon);
    button.setDisabledIcon(icon);
    button.setIconTextGap(8);
@@ -152,18 +187,14 @@ public final class DiscAppearanceDialog implements AutoCloseable {
   return button;
  }
 
- private static final class RandomSwatch implements Icon {
-  private static final DiscSettings.VinylColor[] COLORS={
-   DiscSettings.VinylColor.BLUE,DiscSettings.VinylColor.GREEN,DiscSettings.VinylColor.AMBER,
-   DiscSettings.VinylColor.RED,DiscSettings.VinylColor.PINK,DiscSettings.VinylColor.PURPLE
-  };
+ private record RandomSwatch(int[] colors) implements Icon {
   @Override public int getIconWidth(){return 20;}
   @Override public int getIconHeight(){return 20;}
   @Override public void paintIcon(Component component,Graphics graphics,int x,int y){
    var g=(Graphics2D)graphics.create();
    g.setRenderingHint(RenderingHints.KEY_ANTIALIASING,RenderingHints.VALUE_ANTIALIAS_ON);
-   for(int i=0;i<COLORS.length;i++){
-    var color=new Color(COLORS[i].shade(85));
+   for(int i=0;i<colors.length;i++){
+    var color=new Color(colors[i]);
     g.setColor(component.isEnabled()?color:color.darker().darker());
     g.fillArc(x,y,19,19,90+i*60,60);
    }

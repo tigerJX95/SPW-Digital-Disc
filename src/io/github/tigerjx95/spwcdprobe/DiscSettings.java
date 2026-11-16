@@ -11,6 +11,7 @@ final class DiscSettings implements AutoCloseable {
  static final String ROTATE_KEY="disc_rotation";
  static final String VINYL_KEY="disc_vinyl";
  static final String STYLE_KEY="disc_style";
+ static final String APPEARANCE_CONFIG="disc_appearance.json";
  static final String VINYL_COLOR_KEY="disc_vinyl_color";
  static final String MOTION_SPEED_KEY="disc_motion_speed";
  static final String TRIM_COVER_KEY="cover_white_border_mode";
@@ -30,8 +31,7 @@ final class DiscSettings implements AutoCloseable {
   private static final List<VinylColor> PALETTE=List.of(BLUE,GREEN,AMBER,PURPLE,PINK,RED);
   VinylColor resolve(String album,String albumArtist,String artist,int year,String path,int salt){
    if(this!=RANDOM)return this;
-   int key=album==null||album.isBlank()?Objects.hashCode(path):
-    Objects.hash(album,albumArtist==null||albumArtist.isBlank()?artist:albumArtist,year);
+   int key=AlbumKey.of(album,albumArtist,artist,year,path).colorHash();
    int mixed=(key^salt)*0x9e3779b9;
    return PALETTE.get(Math.floorMod(mixed^(mixed>>>16),PALETTE.size()));
   }
@@ -45,12 +45,49 @@ final class DiscSettings implements AutoCloseable {
    return 0xff000000|red<<16|green<<8|blue;
   }
  }
+ enum ReelColor {
+  SILVER("拉丝银",0xa7a8ab,0xb5b7bb,55), GOLD("香槟金",0xc9a879,0xc9aa79,35),
+  ORANGE("活力橙",0xff6710,0xcd9175,12), WHITE("象牙白",0xf5f4f1,0xaaaeb1,3),
+  GRAPHITE("石墨灰",0x484a50,0x787b80,37), WINE("深酒红",0x682332,0x9a4355,35),
+  RANDOM("随机色",0xff6710,0xcd9175,12);
+  static final ReelColor DEFAULT=SILVER;
+  static final List<ReelColor> PALETTE=List.of(ORANGE,WHITE,SILVER,GOLD,GRAPHITE,WINE);
+  final String label;
+  final int rgb, trim, sheen;
+  ReelColor(String label,int rgb,int trim,int sheen){
+   this.label=label;this.rgb=rgb;this.trim=trim;this.sheen=sheen;
+  }
+ }
+ record AlbumKey(String album,String artist,int year,String path){
+  static AlbumKey of(String album,String albumArtist,String artist,int year,String path){
+   return album==null||album.isBlank()?new AlbumKey(null,null,0,path):
+    new AlbumKey(album,albumArtist==null||albumArtist.isBlank()?artist:albumArtist,year,null);
+  }
+  int colorHash(){return album==null?Objects.hashCode(path):Objects.hash(album,artist,year);}
+ }
+ static final class ReelRandom {
+  private AlbumKey album;
+  private ReelColor color;
+  synchronized ReelColor resolve(AlbumKey next){
+   if(!next.equals(album)){
+    var palette=ReelColor.PALETTE;
+    int previous=palette.indexOf(color==null?ReelColor.RANDOM:color);
+    int pick=java.util.concurrent.ThreadLocalRandom.current().nextInt(palette.size()-(previous<0?0:1));
+    if(previous>=0&&pick>=previous)pick++;
+    color=palette.get(pick);
+    album=next;
+   }
+   return color;
+  }
+ }
  enum Style {
-  CD("专辑封面 CD"), BLACK_VINYL("经典黑胶唱片"), COLORED_VINYL("彩胶唱片");
+  CD("专辑封面 CD"), BLACK_VINYL("经典黑胶唱片"), COLORED_VINYL("彩胶唱片"), REEL("开盘磁带"), REEL_COVER("专辑封面卷盘");
   final String label;
   Style(String label){this.label=label;}
+  boolean reel(){return this==REEL||this==REEL_COVER;}
  }
- record Appearance(Style style,VinylColor color){
+ record Appearance(Style style,VinylColor color,ReelColor reelColor){
+  Appearance(Style style,VinylColor color){this(style,color,ReelColor.DEFAULT);}
   Appearance {
    if(color==VinylColor.BLACK)color=VinylColor.BLUE;
   }
@@ -61,11 +98,12 @@ final class DiscSettings implements AutoCloseable {
    this(amount,front,rotate,new Appearance(vinyl?Style.BLACK_VINYL:Style.CD,VinylColor.BLUE),motionSpeed,rotationSpeed,LocalDiscService.DEFAULT_NAMES,CoverWhiteBorders.Mode.OFF);
   }
   Values(int amount,boolean front,boolean rotate,boolean vinyl){this(amount,front,rotate,vinyl,Speed.STANDARD,Speed.STANDARD);}
-  boolean vinyl(){return appearance.style()!=Style.CD;}
+  boolean vinyl(){return appearance.style()==Style.BLACK_VINYL||appearance.style()==Style.COLORED_VINYL;}
   VinylColor vinylColor(){return appearance.finish();}
  }
  static final Values DEFAULT=new Values(DiscExposure.DEFAULT,false,false,false);
  private final ConfigManager manager;
+ private final ConfigHelper appearanceConfig;
  private final Consumer<Values> update;
  private final AtomicLong revision=new AtomicLong();
  private final Consumer<ConfigHelper> listener=this::changed;
@@ -78,13 +116,15 @@ final class DiscSettings implements AutoCloseable {
  DiscSettings(ConfigManager manager,Consumer<Values> update,Supplier<String> artworkSource){
   this.manager=manager;this.update=update;
   try{
+   appearanceConfig=manager.getConfig(APPEARANCE_CONFIG);
+   migrateAppearance(manager.getConfig("config.json"));
    manager.addConfigChangeListener("config.json",listener);
    update.accept(read(manager.getConfig("config.json")));
    orderDialog=new DiscOrderDialog(this,artworkSource);
    appearanceDialog=new DiscAppearanceDialog(this);
   }catch(RuntimeException error){close();throw error;}
  }
- private static Values read(ConfigHelper config){
+ private Values read(ConfigHelper config){
   int amount;boolean front;
   try{amount=DiscExposure.percent(config.get(DiscExposure.KEY,50f));}
   catch(RuntimeException invalid){amount=DiscExposure.DEFAULT;}
@@ -104,11 +144,26 @@ final class DiscSettings implements AutoCloseable {
   }catch(RuntimeException invalid){return CoverWhiteBorders.Mode.OFF;}
  }
  Appearance appearance(){return appearance(manager.getConfig("config.json"));}
- private static Appearance appearance(ConfigHelper config){
+ private Appearance appearance(ConfigHelper config){
+  Appearance saved=savedAppearance(appearanceConfig);
+  if(saved!=null)return saved;
+  return previousAppearance(config);
+ }
+ private static Appearance savedAppearance(ConfigHelper config){
   try{
    String[] saved=config.get(STYLE_KEY,"").split(":",-1);
-   if(saved.length==2)return new Appearance(Style.valueOf(saved[0]),VinylColor.valueOf(saved[1]));
-  }catch(RuntimeException invalid){ /* Read the previous format. */ }
+   if(saved.length==2||saved.length==3)
+    return new Appearance(Style.valueOf(saved[0]),VinylColor.valueOf(saved[1]),
+      saved.length==3?parseReelColor(saved[2]):ReelColor.DEFAULT);
+  }catch(RuntimeException invalid){ /* Invalid entries have no saved selection. */ }
+  return null;
+ }
+ private static ReelColor parseReelColor(String value){
+  try{return ReelColor.valueOf(value);}catch(IllegalArgumentException invalid){return ReelColor.DEFAULT;}
+ }
+ private static Appearance previousAppearance(ConfigHelper config){
+  Appearance saved=savedAppearance(config);
+  if(saved!=null)return saved;
   boolean vinyl;
   try{Object value=config.get(VINYL_KEY,false);vinyl=Boolean.TRUE.equals(value)||value instanceof String text&&text.equalsIgnoreCase("true");}
   catch(RuntimeException invalid){vinyl=false;}
@@ -116,19 +171,32 @@ final class DiscSettings implements AutoCloseable {
   Style style=!vinyl?Style.CD:color==VinylColor.BLACK?Style.BLACK_VINYL:Style.COLORED_VINYL;
   return new Appearance(style,color);
  }
- synchronized boolean saveAppearance(Appearance appearance){
-  if(!active)return false;
+ private void migrateAppearance(ConfigHelper previous){
+  if(savedAppearance(appearanceConfig)!=null)return;
+  // Native preferences can save an older snapshot of config.json.
+  // Copy existing choices before that file can be rewritten.
   try{
-   ConfigHelper config=manager.getConfig("config.json");
-   Object previous=config.get(STYLE_KEY,"");
-   config.set(STYLE_KEY,appearance.style().name()+":"+appearance.color().name());
+   if(savedAppearance(previous)!=null||!previous.get(VINYL_KEY,"").isEmpty()
+       ||!previous.get(VINYL_COLOR_KEY,"").isEmpty()){
+    persistAppearance(previousAppearance(previous));
+   }
+  }catch(RuntimeException invalid){ /* Use the legacy read path if migration fails. */ }
+ }
+ synchronized boolean saveAppearance(Appearance appearance){
+  if(!active||!persistAppearance(appearance))return false;
+  changed(manager.getConfig("config.json"));
+  return true;
+ }
+ private boolean persistAppearance(Appearance appearance){
+  try{
+   Object previous=appearanceConfig.get(STYLE_KEY,"");
+   String style=appearance.style().name()+":"+appearance.color().name();
+   if(appearance.reelColor()!=ReelColor.DEFAULT)style+=":"+appearance.reelColor().name();
+   appearanceConfig.set(STYLE_KEY,style);
    try{
-    if(config.save()){
-     changed(config);
-     return true;
-    }
+    if(appearanceConfig.save())return true;
    }catch(RuntimeException invalid){ /* Restore the previous selection below. */ }
-   config.set(STYLE_KEY,previous);
+   appearanceConfig.set(STYLE_KEY,previous);
   }catch(RuntimeException invalid){return false;}
   return false;
  }
