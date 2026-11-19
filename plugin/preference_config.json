@@ -34,6 +34,12 @@
           "on_click": "io.github.tigerjx95.spwcdprobe.DiscAppearanceDialog.open"
         },
         {
+          "type": "button",
+          "title": "当前专辑盘面样式",
+          "summary": "单独设置当前播放专辑的盘面，可恢复为全局默认。自定义盘面优先。",
+          "on_click": "io.github.tigerjx95.spwcdprobe.DiscAppearanceDialog.openAlbum"
+        },
+        {
           "type": "list",
           "key": "disc_motion_speed",
           "title": "出收碟速度",

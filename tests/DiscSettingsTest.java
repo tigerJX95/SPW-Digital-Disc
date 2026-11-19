@@ -2,6 +2,8 @@ package io.github.tigerjx95.spwcdprobe;
 import com.xuncorp.spw.workshop.api.config.*;
 import java.nio.file.*;
 import java.util.*;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import javax.swing.SwingUtilities;
 public class DiscSettingsTest {
@@ -63,6 +65,105 @@ public class DiscSettingsTest {
        "restart preserves both exposure and new appearance");
   }
  }
+ static void albumOverridesSurviveRestart()throws Exception{
+  Path file=Files.createTempDirectory("disc-album-styles").resolve("config.json");
+  var first=DiscSettings.AlbumKey.of("专辑 A / Edition","Various Artists","Singer A",2026,"a.flac");
+  var same=DiscSettings.AlbumKey.of("专辑 A / Edition","Various Artists","Singer B",2026,"b.flac");
+  var other=DiscSettings.AlbumKey.of("专辑 A / Edition","Other Artist","Singer B",2026,"c.flac");
+  var missing=DiscSettings.AlbumKey.of(null,null,null,0,"d.flac");
+  var override=new DiscSettings.Appearance(DiscSettings.Style.REEL,DiscSettings.VinylColor.BLUE,DiscSettings.ReelColor.GOLD);
+  var global=new DiscSettings.Appearance(DiscSettings.Style.COLORED_VINYL,DiscSettings.VinylColor.RANDOM);
+  var values=new ArrayList<DiscSettings.Values>();
+  var manager=new Manager(file,helper(file));
+  try(var settings=new DiscSettings(manager,values::add)){
+   check(!settings.saveAlbumAppearance(missing,override),"no album metadata cannot create an override");
+   check(settings.saveAlbumAppearance(first,override),"save album style");
+   check(settings.saveAppearance(global),"change global style independently");
+   manager.helper.set(DiscExposure.KEY,75f);
+   check(manager.helper.save(),"native preferences save");
+   manager.fire();
+   flush();
+   var current=values.getLast();
+   check(current.amount()==75&&current.appearanceFor(same).equals(override),"album override applies to other tracks");
+   check(current.appearanceFor(other).equals(global)&&current.appearanceFor(null).equals(global),"independent album and missing metadata use global");
+  }
+  try(var settings=new DiscSettings(new Manager(file,helper(file)),values::add)){
+   check(values.getLast().appearanceFor(same).equals(override),"album override survives restart");
+   check(settings.saveAlbumAppearance(same,null),"clear album override");
+   flush();
+   check(values.getLast().appearanceFor(first).equals(global),"clearing resumes the current global style");
+  }
+  try(var settings=new DiscSettings(new Manager(file,helper(file)),values::add)){
+   check(settings.albumAppearance(first)==null,"cleared override stays cleared");
+  }
+  var colors=DiscSettings.ReelColor.values();
+  check(colors[0]==DiscSettings.ReelColor.SILVER&&colors[1]==DiscSettings.ReelColor.GOLD
+      &&colors[colors.length-1]==DiscSettings.ReelColor.RANDOM&&DiscSettings.ReelColor.DEFAULT==colors[0],
+      "preserve verified reel order and default");
+  System.out.println("PASS album style precedence, shared album key, independent global settings, restart and reset");
+ }
+ static void largeAlbumSettingsSaveWithoutBlockingUi()throws Exception{
+  Path file=Files.createTempDirectory("disc-large-album-styles").resolve("config.json");
+  int count=10_000;
+  var keys=new ArrayList<DiscSettings.AlbumKey>(count);
+  var records=new StringJoiner("\n");
+  var encoder=Base64.getEncoder();
+  var silver=new DiscSettings.Appearance(DiscSettings.Style.REEL,DiscSettings.VinylColor.BLUE);
+  var random=new DiscSettings.Appearance(DiscSettings.Style.REEL,DiscSettings.VinylColor.BLUE,DiscSettings.ReelColor.RANDOM);
+  for(int index=0;index<count;index++){
+   String title="专辑 "+index;
+   keys.add(new DiscSettings.AlbumKey(title,null,2026,null));
+   records.add(encoder.encodeToString(title.getBytes(java.nio.charset.StandardCharsets.UTF_8))+" - 2026 REEL:BLUE");
+  }
+  var seed=new Manager(file,helper(file));
+  seed.appearance.set(DiscSettings.ALBUM_STYLES_KEY,records.toString());
+  check(seed.appearance.save(),"seed a configuration with 10,000 overrides");
+  var values=new ArrayList<DiscSettings.Values>();
+  long start=System.nanoTime();
+  var manager=new Manager(file,helper(file));
+  try(var settings=new DiscSettings(manager,values::add)){
+   double loadMs=(System.nanoTime()-start)/1_000_000.0;
+   var current=values.getLast();
+   check(current.albumStyles().size()==count,"all overrides loaded");
+   start=System.nanoTime();
+   for(int index=0;index<100_000;index++)
+    check(current.appearanceFor(keys.get(index%count)).equals(silver),"lookup among all stored albums");
+   double lookupMs=(System.nanoTime()-start)/1_000_000.0;
+
+   var started=new CountDownLatch(1);
+   var release=new CountDownLatch(1);
+   var finished=new CountDownLatch(1);
+   var selected=keys.getLast();
+   long[] saveNanos={0};
+   try{
+    SwingUtilities.invokeAndWait(()->DiscAppearanceDialog.runSave(()->{
+     if(SwingUtilities.isEventDispatchThread())return false;
+     started.countDown();
+     try{if(!release.await(5,TimeUnit.SECONDS))return false;}
+     catch(InterruptedException interrupted){Thread.currentThread().interrupt();return false;}
+     long before=System.nanoTime();
+     boolean saved=settings.saveAlbumAppearance(selected,random);
+     saveNanos[0]=System.nanoTime()-before;
+     return saved;
+    },saved->{
+     if(saved&&SwingUtilities.isEventDispatchThread())finished.countDown();
+    }));
+    check(started.await(5,TimeUnit.SECONDS),"save starts off the EDT");
+    SwingUtilities.invokeAndWait(()->check(settings.albumAppearance(selected).equals(silver),
+        "EDT remains responsive during an in-flight save"));
+   }finally{release.countDown();}
+   check(finished.await(5,TimeUnit.SECONDS),"successful save completes on the EDT");
+   flush();
+   check(values.getLast().appearanceFor(selected).equals(random),"published snapshot includes the new selection");
+   System.out.printf(Locale.ROOT,"10,000 overrides: load %.1f ms, worker save %.1f ms, 100,000 lookups %.1f ms%n",
+       loadMs,saveNanos[0]/1_000_000.0,lookupMs);
+  }
+  try(var settings=new DiscSettings(new Manager(file,helper(file)),value->{})){
+   check(settings.albumAppearance(keys.getLast()).equals(random),"random selection persists after restarting");
+   check(settings.albumAppearance(keys.getFirst()).equals(silver),"other selections are preserved");
+  }
+ }
+
  public static void main(String[] args)throws Exception{
   Path file=Files.createTempDirectory("disc-settings").resolve("config.json");
   ConfigHelper config=helper(file);Manager manager=new Manager(file,config);var values=new ArrayList<Integer>();
@@ -85,6 +186,8 @@ public class DiscSettingsTest {
   Manager restored=new Manager(file,helper(file));var restart=new ArrayList<Integer>();
   try(DiscSettings next=new DiscSettings(restored,v->{restart.add(v.amount());check(v.localNames().getFirst().equals("disc.png"),"restore ordered filenames");})){check(restart.equals(List.of(100)),"restart restores saved exposure and filenames rather than unsaved slider changes");}
   appearanceSurvivesNativeSliderSave();
+  albumOverridesSurviveRestart();
+  largeAlbumSettingsSaveWithoutBlockingUi();
   var random=new DiscSettings.ReelRandom();
   DiscSettings.ReelColor previous=null;
   for(int track=0;track<48;track++){

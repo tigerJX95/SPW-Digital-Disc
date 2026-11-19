@@ -4,11 +4,13 @@
 
 Adds a digital CD presentation to Salt Player (SPW), with a complete album cover and a CD extending from its right side.
 
-Current stable version: **v1.10.1**
+Current stable version: **v1.11.0**
 
-- Added an open-reel tape style with Solid Color and Album Cover options. Both variants have three tape windows and circular lettering on the hub.
-- Solid Color offers six finishes and a Random option that keeps the same color within an album and picks a different color on album changes. The album-cover reel keeps the artwork visible through the glass ring and uses a black inner outline and clipping to keep artwork inside the silver rim.
-- Fixed an issue where adjusting disc exposure could reset the selected default style to Album Cover CD.
+- Set a disc style for the current album from its own entry in plugin settings. Tracks from the same album share the setting, which can be reset to the global default.
+- Disc style settings save in the background while the player stays responsive.
+- The album dialog identifies the album and shows the artwork source at the time it was opened. It highlights when custom artwork takes priority, and the lookup-order dialog explains whether changing the order applies to the current track.
+- Compatibility logs now give a reason when host interface checks fail.
+- With CUE for Salt Player v0.6.0 enabled, switching CUE tracks within the same audio file also replays the disc eject animation.
 
 [Update history](CHANGELOG.md) (Chinese)
 
@@ -29,6 +31,7 @@ I wanted to bring this digital record experience to Salt Player: enjoying the co
 - **Custom disc artwork**: searches the current song's directory in the default order below or the order set in plugin preferences. If a higher-priority file cannot be decoded, the next file is tried.
 - **Generated disc artwork**: when custom artwork is unavailable, a copy of the album cover fills a circular CD with a narrow white edge, translucent annular hub, translucent center hole and tiny white spindle. Two narrow silver bevels use adjacent highlights and grooves around a translucent hub field, preserving the artwork underneath; the main cover remains complete.
 - **Open-reel tape**: choose Open-Reel Tape under Default Disc Style, then select Solid Color or Album Cover. Solid Color offers Brushed Silver, Champagne Gold, Vibrant Orange, Ivory White, Graphite Gray, Deep Wine Red, and Random, with Brushed Silver selected by default. The random color stays the same within an album and changes when switching albums. Available custom disc artwork takes priority.
+- **Album disc style**: Select **当前专辑盘面样式** (Current Album Disc Style) in the plugin settings to set a style for the currently playing album. Reset restores the global default for that album. Custom disc artwork takes priority.
 - Cover Border Trimming is off by default. Choose paired horizontal or vertical borders, or trim only the disc-side strip when both the left and right edges have continuous near-white borders.
 
   Trimming affects only the secondary display and leaves the original artwork file intact. Stretching a heavily cropped image to fill a square can distort people in the cover art, so the plugin uses the cropped aspect ratio when the result is substantially wider or taller than a square. Trimming checks the color of edge pixels. Top and bottom borders must match. If text or other details interrupt a border, both edges are preserved. This feature detects only white or near-white edges. Red, black, and other borders are preserved because they may be part of the original composition. A white border may also be retained if it has a noticeable color cast, marks, or text and artwork extending to the edge. For a square cover that preserves the original proportions and composition, we recommend using an AI image tool to extend the background, then setting the result as the album cover.
@@ -212,7 +215,7 @@ If using PowerShell, configure the same environment variables and run this in th
 After the build reports `BUILD SUCCESSFUL`, look in the source directory's `dist` folder for:
 
 ```text
-SPW_Digital_Disc_v1.10.1.spmod
+SPW_Digital_Disc_v1.11.0.spmod
 ```
 
 This is the installation package that SPW can import. You do not need to ZIP the entire source directory or rename its extension. The `build` directory contains intermediate build output, not the installation package.

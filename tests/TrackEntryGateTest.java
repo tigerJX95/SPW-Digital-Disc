@@ -1,8 +1,11 @@
 package io.github.tigerjx95.spwcdprobe;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.util.HexFormat;
 import java.util.concurrent.atomic.AtomicInteger;
 public class TrackEntryGateTest {
  static void check(boolean b,String why){if(!b)throw new AssertionError(why);}
- public static void main(String[] args){
+ public static void main(String[] args)throws Exception{
   long t=1_000_000_000L;Object art=new Object();TrackEntryGate gate=new TrackEntryGate();DiscTransition motion=new DiscTransition();
   check(!gate.observe("A",t),"initial page binds without extra track replay");
   motion.enter();motion.ready(t);motion.tick(t+940_000_000);check(motion.pose().exposed()==1,"page entry settles");
@@ -46,6 +49,44 @@ public class TrackEntryGateTest {
   gate.request("B",now+1);gate.request("A",now+2);
   check(!gate.ready("A",art,true,true,now+2),"draw-time ABA starts settle");
   check(gate.ready("A",art,true,true,now+280_000_002L),"draw-time requests cannot strand TRACK_WAIT between timer ticks");
-  System.out.println("PASS latest-only ten-track burst, 280ms quiet interval, one-shot request, three spaced-track ejects, slow decode, stable ready source, fixed cover geometry, stale-song rejection, return protection and reset cancellation");
+  cueSegmentChanges();
+  System.out.println("PASS latest-only track entry, stable artwork, return protection and CUE segment/cross-disc transitions");
+ }
+
+ private static void cueSegmentChanges()throws Exception{
+  String discOne="专辑/第1碟.wav",discTwo="专辑/第2碟.wav";
+  String first=cueState(discOne,0),second=cueState(discOne,750),third=cueState(discOne,1500);
+  CuePlaybackTrack cue=new CuePlaybackTrack();
+  TrackEntryGate gate=new TrackEntryGate();
+  Object cover=new Object();
+  long now=100_000L;
+  check(!cue.changed(discOne,null)&&!gate.observe(discOne,now),"page entry with CUE discovery pending");
+  check(!cue.changed(discOne,first),"first CUE advertisement only establishes playback identity");
+  check(!cue.changed(discOne,first),"unchanged during pause, resume and seek within the first segment");
+  for(String next:new String[]{second,third,second,third}){
+   now+=2_000_000_000L;
+   check(cue.changed(discOne,next),"natural advance, direct selection and previous/next change the segment");
+   check(!gate.observe(discOne,now),"physical audio remains unchanged");
+   gate.request(discOne,now);
+   check(!gate.ready(discOne,cover,true,true,now),"use the existing selection settle period");
+   check(gate.ready(discOne,cover,true,true,now+TrackEntryGate.QUIET_NS),"same cover/artwork can animate the CUE track");
+   check(!gate.ready(discOne,cover,true,true,now+TrackEntryGate.QUIET_NS+1),"one eject per settled CUE segment");
+   check(!cue.changed(discOne,next)&&!cue.changed(discOne,null)&&!cue.changed(discOne,next),
+       "a repeated segment or temporary CUE refresh cannot replay the animation");
+  }
+  now+=2_000_000_000L;
+  check(gate.observe(discTwo,now)&&!cue.changed(discTwo,third),"cross-disc uses the physical transition and ignores old CUE data");
+  check(!cue.changed(discTwo,cueState(discTwo,0)),"new disc advertisement cannot trigger a duplicate eject");
+  gate.ready(discTwo,cover,true,true,now);
+  check(gate.ready(discTwo,cover,true,true,now+TrackEntryGate.QUIET_NS),"cross-disc eject is consumed once");
+  check(!cue.changed(discTwo,"bad value")&&!cue.changed(discTwo,cueState(discTwo,-1)),
+      "malformed CUE state has no effect");
+  cue.reset();
+  check(!cue.changed(discTwo,cueState(discTwo,750)),"reopening the page only binds the current segment");
+ }
+
+ private static String cueState(String audio,long frame)throws Exception{
+  var digest=MessageDigest.getInstance("SHA-256").digest(audio.getBytes(StandardCharsets.UTF_8));
+  return HexFormat.of().formatHex(digest)+":"+frame+":66564bb7-4e6e-4d09-a89a-0834b3cd3f41";
  }
 }

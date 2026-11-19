@@ -39,6 +39,9 @@ public final class CdPageProbePlugin extends SpwPlugin {
    },new ThreadPoolExecutor.DiscardPolicy());
  private static final long LOG_MAX_BYTES=256L*1024;
  private volatile boolean running;
+ private boolean renderWarmupPending, renderWarmupDone;
+ private int entriesTimed;
+ private ReelEntryRaster reelRasters;
  private javax.swing.Timer sourceObserver,animationClock;
  private final MutableState<Long> sourceRevision=state(0L);
  private final DiscSettings.ReelRandom reelRandom=new DiscSettings.ReelRandom();
@@ -61,11 +64,16 @@ public final class CdPageProbePlugin extends SpwPlugin {
   PlayerSheetState sheet;
   boolean renderAllowed=true,failed,suppressionApplied,secondary;
   Object lastPainted;
-  boolean revealMeasured;
+  boolean revealMeasured, slowEntryDrawLogged;
+  EntryTiming entryTiming;
+  CoverHandoff coverHandoff;
+  DiscSettings.ReelColor reelRasterChoice;
+  boolean useReelRaster, rasterDrawn;
   final MutableState<Object> passPainter=state(null);
   Object observedSource;
   boolean observedReady,observedMissing,fallbackActive;
   String observedSong;
+  DiscSettings.AlbumKey observedAlbum;
   ReflectionRenderer reflection;
   final FrontDiscLayer frontDiscLayer=new FrontDiscLayer();
   final DiscRotation rotation=new DiscRotation();
@@ -74,6 +82,7 @@ public final class CdPageProbePlugin extends SpwPlugin {
   final RevealCycle revealCycle=new RevealCycle();
   final CoverSelection coverSelection=new CoverSelection();
   final TrackEntryGate trackGate=new TrackEntryGate();
+  final CuePlaybackTrack cueTrack=new CuePlaybackTrack();
   final MutableState<Boolean> trackPending=state(false);
   final DiscTransition motion=new DiscTransition();
   final MutableState<DiscTransition.Pose> pose=state(motion.pose());
@@ -84,11 +93,17 @@ public final class CdPageProbePlugin extends SpwPlugin {
    motion.close(now,done,visibleDisc);pose.setValue(motion.pose());
   }
   void advanceMotion(long now){
+   boolean redrawEntry=motion.pageEntryAnimating();
    boolean changed=motion.tick(now);
    // Widget width conservatively bounds both cover centering and disc travel,
    // including full exposure. Never advance navigation during the brake.
    changed=motion.finishSubpixelReturn(now,widgetWidth)||changed;
-   if(changed)pose.setValue(motion.pose());
+   if(changed){
+    pose.setValue(motion.pose());
+    // Request a draw for page-entry motion even when Compose batches state notifications.
+    if(redrawEntry&&suppressionApplied&&CanvasWidget.requestDraw(widgetRoot)&&entryTiming!=null)
+     entryTiming.drawRequested();
+   }
   }
   String lastBoundsError="";
   DiscImage ownedCover,pendingCover;
@@ -117,6 +132,36 @@ public final class CdPageProbePlugin extends SpwPlugin {
    // even if playback advanced, but never expose a CD for the outgoing song.
    boolean showDisc=drawSong!=null&&Objects.equals(drawSong,playbackSong)&&(ownedCover!=null||pendingCover==null);
    return new DrawCover(painter,visualCover(),showDisc?exposed:0f);
+  }
+  void prepareHiddenDisc(androidx.compose.ui.graphics.drawscope.DrawScope scope, float exposed, int amount,
+      float aspect, boolean trimmed, DiscSettings.Style style, DiscSettings.VinylColor vinylColor,
+      DiscSettings.ReelColor reelColor, java.util.function.Supplier<androidx.compose.ui.graphics.Path> paths,
+      java.util.function.Supplier<LocalDiscService.ArtworkStatus> artworkStatus){
+   if(exposed!=0||amount<=0||motion.closing()||motion.finished())return;
+   var status=artworkStatus.get();
+   if(!status.resolved()||status.fileName()!=null)return;
+   if(style==DiscSettings.Style.REEL&&reelRasters!=null)reelRasters.prepare(reelColor);
+   // A lookup can finish after the first cover draw. Every hidden pass
+   // can prepare the current style and size; the renderer reuses hot caches.
+   try{RootRenderer.prepareDefaultDisc(scope,amount,aspect,trimmed,style,vinylColor,reelColor,paths);}
+   catch(Exception|LinkageError error){report("DISC_PREPARE_ERROR "+error.getClass().getSimpleName());}
+  }
+  boolean drawPreparedReel(ReelEntryRaster cache,DiscSettings.ReelColor color,float angle,
+      androidx.compose.ui.graphics.drawscope.DrawScope target,float cx,float cy,float diameter){
+   if(cache==null)return false;
+   if(angle!=0){
+    // The live renderer keeps the metal highlights stationary during rotation.
+    reelRasterChoice=color;useReelRaster=false;
+    return false;
+   }
+   if(reelRasterChoice!=color){
+    reelRasterChoice=color;
+    useReelRaster=cache.ready(color,diameter);
+   }
+   if(!useReelRaster)return false;
+   useReelRaster=cache.draw(color,target,cx,cy,diameter);
+   rasterDrawn|=useReelRaster;
+   return useReelRaster;
   }
   Object paintSource(){
    if(!presentationVisible())return null;
@@ -174,7 +219,8 @@ public final class CdPageProbePlugin extends SpwPlugin {
   }
   void restoreNative(){
    clearCover();lastPainted=null;rotation.reset();rotationAngle.setValue(0f);
-   secondary=false;ready.setValue(false);widgetRoot=null;revealCycle.reset();motion.reset();trackGate.reset();trackPending.setValue(false);retainingReturn.setValue(false);pose.setValue(motion.pose());
+   entryTiming=null;coverHandoff=null;
+   secondary=false;ready.setValue(false);widgetRoot=null;revealCycle.reset();motion.reset();trackGate.reset();cueTrack.reset();trackPending.setValue(false);retainingReturn.setValue(false);pose.setValue(motion.pose());
    if(suppressionApplied)HostCoverBridge.invalidate(nativeRoot);
    passPainter.setValue(null);suppressionApplied=false;
   }
@@ -183,13 +229,35 @@ public final class CdPageProbePlugin extends SpwPlugin {
    if(edge==RevealCycle.Edge.NONE)return;
    if(edge==RevealCycle.Edge.HIDDEN){freezeRotation(System.nanoTime());clearCover();}
    // No old pass, pending return or track request may leak into the next presentation.
-   motion.reset();trackGate.reset();trackPending.setValue(false);retainingReturn.setValue(false);
+   motion.reset();trackGate.reset();cueTrack.reset();trackPending.setValue(false);retainingReturn.setValue(false);
    passPainter.setValue(null);suppressionApplied=false;lastPainted=null;
-   if(edge==RevealCycle.Edge.SHOWN){revealMeasured=false;motion.enter();report("PRESENTATION_READY restart cover-first entry");}
+   entryTiming=null;coverHandoff=null;
+   if(edge==RevealCycle.Edge.SHOWN){
+    revealMeasured=slowEntryDrawLogged=false;motion.enter();
+    if(entriesTimed<2)entryTiming=new EntryTiming(System.nanoTime());
+    report("PRESENTATION_READY restart cover-first entry");
+   }
    pose.setValue(motion.pose());HostCoverBridge.invalidate(nativeRoot);
   }
   List<HostCoverBridge.Image> images(){
    var root=nativeRoot;return root!=null&&root.isAttached()?HostCoverBridge.images(root):List.of();
+  }
+  CoverHandoff measureCoverHandoff(Object painter,float side,float aspect){
+   if(widgetRoot==null||!widgetRoot.isAttached())return CoverHandoff.FALLBACK;
+   for(var image:images()){
+    if(image.painter()!=painter||!image.coordinates().isAttached())continue;
+    try{
+     var bounds=widgetRoot.localBoundingBoxOf(image.coordinates(),false);
+     var handoff=CoverHandoff.from(bounds,side,aspect);
+     if(handoff!=CoverHandoff.FALLBACK){
+      report("COVER_HANDOFF nativePx="+bounds.getWidth()+"x"+bounds.getHeight()
+          +" overlaySidePx="+side+" startScale="+handoff.scale()+" centered=true");
+      return handoff;
+     }
+    }catch(RuntimeException ignored){ /* A native layout node can detach during handoff. */ }
+   }
+   report("COVER_HANDOFF native geometry unavailable");
+   return CoverHandoff.FALLBACK;
   }
   boolean owns(Object painter,long drawSize){
    var root=nativeRoot;
@@ -229,11 +297,12 @@ public final class CdPageProbePlugin extends SpwPlugin {
     fallbackActive=false;rotation.reset();rotationAngle.setValue(0f);
     boolean previouslyObserved=observedSong!=null;
     if(song!=null&&!song.isBlank())awaitCover();else clearCover();
-    observedSong=song;failed=false;rejectedSource.setValue(null);artwork.setValue(null);
+    observedSong=song;observedAlbum=currentAlbumKey(song);failed=false;rejectedSource.setValue(null);artwork.setValue(null);
     // Keep native suppression continuous even when the observer runs before
     // the parent's next draw pass. Clearing this state causes a native-layout flash.
     passPainter.setValue(suppressionApplied&&presentationVisible()?pendingCover:null);lastPainted=null;
     if(previouslyObserved&&presentationVisible()&&motion.phase()!=DiscTransition.Phase.WAITING&&!motion.closing()&&!motion.finished()){
+     entryTiming=null;
      trackGate.request(song,System.nanoTime());
      motion.trackChanged();trackPending.setValue(true);pose.setValue(motion.pose());
     }
@@ -259,7 +328,7 @@ public final class CdPageProbePlugin extends SpwPlugin {
   if(running)return;
   report("HOST_DETECTED version="+getPluginContext().getSpwVersion()+" channel="+getPluginContext().getSpwChannel()+" os="+System.getProperty("os.name")+" java="+System.getProperty("java.version"));
   try{host=new HostBindings(HostCompatibility.verify(getPluginContext(),getClass().getClassLoader()),getClass().getClassLoader());report("HOST_PROFILE "+host.profile.version());}
-  catch(IllegalStateException incompatible){report("HOST_REJECTED "+incompatible.getClass().getSimpleName());throw incompatible;}
+  catch(IllegalStateException incompatible){report("HOST_REJECTED "+incompatible.getMessage());throw incompatible;}
   if(!WorkshopApi.manager().isPermissionGranted(PluginPermission.CLASS_TRANSFORM)||!WorkshopApi.manager().isPermissionGranted(PluginPermission.LIBRARY_READ))throw new IllegalStateException("Grant class-transform and library-read permissions");
   try{
    var painterDraw=PainterDrawBinding.METHOD;
@@ -269,7 +338,7 @@ public final class CdPageProbePlugin extends SpwPlugin {
    discSettings=new DiscSettings(WorkshopApi.manager().createConfigManager(),value->{
     if(localDiscs!=null)localDiscs.setNames(value.localNames());
     displaySettings.setValue(value);report("DISC_SETTINGS amount="+value.amount()+" front="+value.front()+" rotate="+value.rotate()+" vinyl="+value.vinyl());
-   },this::artworkSource);
+   },this::artworkSource,()->currentAlbumKey(currentSong()));
    handles.add(WorkshopApi.hookRegistrar().replaceComposable(host.cover.getDeclaringClass().getName(),host.cover.getName(),host.caller,
     List.of("kotlin.jvm.functions.Function0","boolean","boolean","boolean","androidx.compose.ui.Modifier"),50,new ComposableHook(){
      @Override public void Content(UiHookCall call,Composer composer,int changed){content(call,composer);}
@@ -287,12 +356,14 @@ public final class CdPageProbePlugin extends SpwPlugin {
    localDiscs=new LocalDiscService<>(this::currentSong,DiscImage::decode,()->discRevision.setValue(discRevision.getValue()+1),this::report);
    localDiscs.setNames(displaySettings.getValue().localNames());
    localDiscs.start();
+   renderWarmupPending=true;renderWarmupDone=false;entriesTimed=0;
+   reelRasters=new ReelEntryRaster(this::report);
    enabled.setValue(true);running=true;
    // Swing Timer actions execute on Compose Desktop's UI event thread; native
    // layout nodes must not be traversed by the local-image decode worker.
    sourceObserver=new javax.swing.Timer(100,event->observeSources());sourceObserver.start();
    animationClock=new javax.swing.Timer(16,event->animateFrames());animationClock.setCoalesce(true);animationClock.start();
-   report("START 1.10.1 Host Binding; retained pixels are not readiness; hooks="+handles.size());
+   report("START 1.11.0 Host Binding; retained pixels are not readiness; entryStart=sourceReady; hooks="+handles.size());
   }catch(Throwable e){stop();throw new IllegalStateException("SelfDraw startup failed",e);}
  }
  @SuppressWarnings("unchecked")
@@ -341,12 +412,15 @@ public final class CdPageProbePlugin extends SpwPlugin {
   box=DrawModifierKt.drawWithContent(box,scope->{
    // Observes both enabled and ready. Turning the new widget on/off refreshes
    // cached native image layers so the fallback never stays blank/duplicated.
+   var timing=frame.entryTiming;
+   long handoffStarted=timing==null?0:System.nanoTime();
    Object selected=frame.paintSource();
    frame.passPainter.setValue(frame.suppress()?selected:null);
    boolean suppression=frame.passPainter.getValue()!=null;
    String diagnostic="secondary="+frame.secondary+" allowed="+frame.renderAllowed+" ready="+frame.ready.getValue()+" failed="+frame.failed+" owned="+(frame.ownedCover!=null)+" placeholder="+(frame.pendingCover!=null)+" selected="+(selected!=null)+" phase="+frame.motion.phase()+" custom="+suppression;
    if(!diagnostic.equals(frame.handoffDiagnostic)){frame.handoffDiagnostic=diagnostic;report("DRAW_HANDOFF "+diagnostic);}
    if(suppression!=frame.suppressionApplied){frame.suppressionApplied=suppression;HostCoverBridge.invalidate(frame.nativeRoot);}
+   if(timing!=null)timing.handoff(System.nanoTime()-handoffStarted);
    scope.drawContent();return Unit.INSTANCE;
   });
   final boolean show=active&&plan.usable(density.getDensity());
@@ -387,65 +461,115 @@ public final class CdPageProbePlugin extends SpwPlugin {
       DrawCover selected=frame.drawCover(drawSong,playbackSong,motion.exposed());
       if(selected==null)return Unit.INSTANCE;
       Object painter=selected.painter();
+      var timing=frame.entryTiming;
       boolean firstPaint=frame.lastPainted!=painter;
       boolean firstReveal=!frame.revealMeasured&&selected.exposed()>0&&amount>0;
-      long started=firstPaint||firstReveal?System.nanoTime():0;
+      var phase=frame.motion.phase();
+      boolean measureEntry=!frame.slowEntryDrawLogged
+          &&(phase==DiscTransition.Phase.COVER||phase==DiscTransition.Phase.OPENING);
+      long started=firstPaint||firstReveal||measureEntry||timing!=null?System.nanoTime():0;
+      long reflectionNanos=0;
       try{
        discRevision.getValue(); // Observe async image publication, including same-song file replacement.
+       LocalDiscService<DiscImage> service=localDiscs;
+       var album=frame.observedAlbum;
+       var appearance=display.appearanceFor(album);
+       var vinylColor=resolveVinylColor(appearance.finish(),album,drawSong);
+       var selectedReelColor=appearance.reelColor();
+       var reelColor=appearance.style()==DiscSettings.Style.REEL&&selectedReelColor==DiscSettings.ReelColor.RANDOM
+         ?reelRandom.resolve(album!=null?album:DiscSettings.AlbumKey.of(null,null,null,0,drawSong)):selectedReelColor;
+       var reelCache=reelRasters;
+       frame.rasterDrawn=false;
+       if(selected.exposed()==0||appearance.style()!=DiscSettings.Style.REEL)frame.reelRasterChoice=null;
        RootRenderer.Disc disc=(target,cx,cy,diameter)->{
-        LocalDiscService<DiscImage> service=localDiscs;
-        String song;
-        try{song=currentSong();}catch(Exception unavailable){return true;}
-        if(!Objects.equals(drawSong,song))return true;
-        // true also means pending: draw cover only, never a temporary silver CD.
-        try{return service==null||service.drawResolved(song,image->image.draw(target,cx,cy,diameter));}
+        // Resolve custom artwork before offering any generated reel.
+        try{if(service==null||service.drawResolved(drawSong,image->image.draw(target,cx,cy,diameter)))return true;}
         catch(Exception error){report("LOCAL_CD_DRAW_ERROR "+error.getClass().getSimpleName());return true;}
+        return appearance.style()==DiscSettings.Style.REEL
+            &&frame.drawPreparedReel(reelCache,reelColor,angle,target,cx,cy,diameter);
        };
-       var vinylColor=resolveVinylColor(display.vinylColor(),drawSong);
-       var selectedReelColor=display.appearance().reelColor();
-       var reelColor=display.appearance().style()==DiscSettings.Style.REEL&&selectedReelColor==DiscSettings.ReelColor.RANDOM
-         ?reelRandom.resolve(currentAlbumKey(drawSong)):selectedReelColor;
        var canvas=scope.getDrawContext().getCanvas();canvas.save();
        try{
         float travel=DiscExposure.fraction(amount)*.5f;
         float offset=plan.side()*travel*motion.centered();
         float pivot=plan.side()*(.5f+travel-travel*motion.centered());
-        canvas.translate(offset+pivot,plan.side()*.5f);
-        canvas.scale(motion.scale(),motion.scale());
-        canvas.translate(-pivot,-plan.side()*.5f);
         DiscImage cover=selected.cover();
         var bounds=cover==null||display.trimCover()==CoverWhiteBorders.Mode.OFF?null:cover.coverBounds(display.trimCover());
         boolean trim=bounds!=null;
         float aspect=cover==null?1f:trim?bounds.displayAspect():cover.aspect();
+        var handoff=frame.coverHandoff;
+        if(handoff==null&&(phase==DiscTransition.Phase.WAITING||phase==DiscTransition.Phase.COVER)){
+         // Freeze the starting size on the first overlay frame. The native
+         // painter may still belong to the outgoing lyrics layout.
+         // Later painter replacements must not restart the scale animation.
+         handoff=frame.measureCoverHandoff(painter,plan.side(),aspect);
+         frame.coverHandoff=handoff;
+        }
+        float scale=handoff==null?motion.scale():handoff.animatedScale(CoverHandoff.remaining(motion.scale()));
+        canvas.translate(offset+pivot,plan.side()*.5f);
+        canvas.scale(scale,scale);
+        canvas.translate(-pivot,-plan.side()*.5f);
         RootRenderer.Source source=cover==null?null:new RootRenderer.Source(){
          public void draw(androidx.compose.ui.graphics.drawscope.DrawScope target,float w,float h)throws Exception{
           if(trim)cover.drawTrimmedCover(target,w,h,bounds);else cover.drawCover(target,w,h);
          }
         };
         float exposed=selected.exposed();
-        if(firstPaint&&exposed==0&&amount>0&&localDiscs!=null){
-         var artwork=localDiscs.artworkStatus(drawSong);
-         if(artwork.resolved()&&artwork.fileName()==null){
-          try{RootRenderer.prepareDefaultDisc(scope,amount,aspect,trim,display.appearance().style(),vinylColor,reelColor);}
-          catch(Exception|LinkageError error){report("DISC_PREPARE_ERROR "+error.getClass().getSimpleName());}
-         }
+        if(service!=null&&drawSong!=null&&Objects.equals(drawSong,playbackSong)){
+         frame.prepareHiddenDisc(scope,exposed,amount,aspect,trim,appearance.style(),vinylColor,reelColor,
+             androidx.compose.ui.graphics.SkiaBackedPath_skikoKt::Path,()->service.artworkStatus(drawSong));
         }
-        if(cover!=null)RootRenderer.paint(scope,aspect,source,disc,androidx.compose.ui.graphics.SkiaBackedPath_skikoKt::Path,exposed,amount,front,frame.frontDiscLayer,angle,display.appearance().style(),vinylColor,trim,reelColor);
-        else RootRenderer.draw(scope,painter,()->rawSource.set(true),()->rawSource.remove(),disc,exposed,amount,front,frame.frontDiscLayer,angle,frame.fallbackActive,display.appearance().style(),vinylColor,reelColor);
+        if(cover!=null)RootRenderer.paint(scope,aspect,source,disc,androidx.compose.ui.graphics.SkiaBackedPath_skikoKt::Path,exposed,amount,front,frame.frontDiscLayer,angle,appearance.style(),vinylColor,trim,reelColor);
+        else RootRenderer.draw(scope,painter,()->rawSource.set(true),()->rawSource.remove(),disc,exposed,amount,front,frame.frontDiscLayer,angle,frame.fallbackActive,appearance.style(),vinylColor,reelColor);
         float gap=4*density.getDensity(),reflectedHeight=plan.height()-plan.side()-gap;
         if(reflectedHeight>0){
          if(frame.reflection==null)frame.reflection=new ReflectionRenderer();
-         try{frame.reflection.draw(scope,plan.side(),plan.width(),reflectedHeight,gap,()->{
-          if(cover!=null)RootRenderer.paint(scope,aspect,source,disc,androidx.compose.ui.graphics.SkiaBackedPath_skikoKt::Path,exposed,amount,front,frame.frontDiscLayer,angle,display.appearance().style(),vinylColor,trim,reelColor);
-          else RootRenderer.draw(scope,painter,()->rawSource.set(true),()->rawSource.remove(),disc,exposed,amount,front,frame.frontDiscLayer,angle,frame.fallbackActive,display.appearance().style(),vinylColor,reelColor);
-         });}
-         catch(Exception error){report("REFLECTION_ERROR "+error.getClass().getSimpleName());}
+         long reflectionStarted=started==0?0:System.nanoTime();
+         try{
+          float mirrorExposure=exposed;
+          if(!front&&!trim&&exposed>0&&service!=null){
+           var artwork=service.artworkStatus(drawSong);
+           if(artwork.resolved()&&artwork.fileName()==null){
+            mirrorExposure=RootRenderer.reflectedExposure(scope,exposed,amount,plan.side()-reflectedHeight);
+           }
+          }
+          float reflected=mirrorExposure;
+          frame.reflection.draw(scope,plan.side(),plan.width(),reflectedHeight,gap,()->{
+           if(cover!=null)RootRenderer.paint(scope,aspect,source,disc,androidx.compose.ui.graphics.SkiaBackedPath_skikoKt::Path,reflected,amount,front,frame.frontDiscLayer,angle,appearance.style(),vinylColor,trim,reelColor);
+           else RootRenderer.draw(scope,painter,()->rawSource.set(true),()->rawSource.remove(),disc,reflected,amount,front,frame.frontDiscLayer,angle,frame.fallbackActive,appearance.style(),vinylColor,reelColor);
+          });
+         }catch(Exception error){report("REFLECTION_ERROR "+error.getClass().getSimpleName());}
+         finally{if(reflectionStarted!=0)reflectionNanos=System.nanoTime()-reflectionStarted;}
         }
        }finally{canvas.restore();}
-       if(firstPaint){frame.lastPainted=painter;report("SELF_DRAW source="+painter.getClass().getName()+" widgetPx="+plan.width()+"x"+plan.height()+" coverSidePx="+plan.side()+" secondary="+plan.secondary()+" elapsedUs="+elapsedMicros(started));}
+       if(timing!=null){
+        timing.paint(phase,started,System.nanoTime()-started,reflectionNanos);
+        if(phase==DiscTransition.Phase.OPEN){
+         frame.entryTiming=null;
+         if(entriesTimed<2)report(timing.summary(++entriesTimed));
+        }
+       }
+       if(firstPaint){
+        frame.lastPainted=painter;
+        long drawMicros=elapsedMicros(started);
+        report("SELF_DRAW prepared="+renderWarmupDone+" source="+painter.getClass().getName()
+            +" widgetPx="+plan.width()+"x"+plan.height()+" coverSidePx="+plan.side()+" secondary="+plan.secondary()
+            +" elapsedUs="+drawMicros+" canvasLayer="+CanvasWidget.hasDrawingLayer(frame.widgetRoot));
+       }
+       if(measureEntry){
+        long drawMicros=elapsedMicros(started);
+        if(drawMicros>=24_000){
+         frame.slowEntryDrawLogged=true;
+         report("ENTRY_SLOW_DRAW phase="+phase+" elapsedUs="+drawMicros+" reflectionUs="+reflectionNanos/1_000);
+        }
+       }
        if(firstReveal){
         frame.revealMeasured=true;
-        report("FIRST_REVEAL_DRAW elapsedUs="+elapsedMicros(started));
+        long drawMicros=elapsedMicros(started);
+        var artwork=service==null?null:service.artworkStatus(drawSong);
+        String artworkKind=artwork==null||!artwork.resolved()?"unresolved":artwork.fileName()==null?"generated":"local";
+        report("FIRST_REVEAL_DRAW elapsedUs="+drawMicros+" reflectionUs="+reflectionNanos/1_000
+            +" style="+appearance.style()+" artwork="+artworkKind+" reelRaster="+frame.rasterDrawn);
        }
       }catch(Throwable error){frame.clearCover();frame.passPainter.setValue(null);frame.rejectedSource.setValue(painter);HostCoverBridge.invalidate(frame.nativeRoot);report("SELF_DRAW_SOURCE_ERROR native fallback until a fresh source: "+error.getClass().getSimpleName());}
       return Unit.INSTANCE;
@@ -463,22 +587,28 @@ public final class CdPageProbePlugin extends SpwPlugin {
   for(Frame frame:current)if(frame.owns(painter,drawSize)){if(match!=null&&match!=frame)return null;match=frame;}
   return match;
  }
- private String artworkSource(){
+ private DiscSettings.ArtworkSource artworkSource(){
   try{
    String song=currentSong();
-   if(song==null||song.isBlank())return "未播放曲目";
+   if(song==null||song.isBlank())return new DiscSettings.ArtworkSource("未播放曲目");
    var service=localDiscs;
-   if(service==null)return "盘面来源暂不可用";
+   if(service==null)return new DiscSettings.ArtworkSource("盘面来源暂不可用");
    var artwork=service.artworkStatus(song);
-   if(!artwork.resolved())return "正在查找盘面图片…";
-   if(artwork.fileName()!=null)return "使用自定义图片 "+artwork.fileName();
+   if(!artwork.resolved())return new DiscSettings.ArtworkSource("正在查找盘面图片…");
+   if(artwork.fileName()!=null)return new DiscSettings.ArtworkSource("使用自定义图片 "+artwork.fileName(),DiscSettings.ArtworkKind.CUSTOM);
    var display=displaySettings.getValue();
-   if(display.appearance().style().reel())return display.appearance().style().label;
-   String style=!display.vinyl()?"CD":display.vinylColor()==DiscSettings.VinylColor.BLACK?"黑胶":display.vinylColor()==DiscSettings.VinylColor.RANDOM?"随机色彩胶":display.vinylColor().label+"彩胶";
-   if(coverAvailability.missing(song))return "无可用图片，显示空白 "+style;
-   if(coverAvailability.available(song))return "由专辑封面生成（"+style+" 样式）";
-   return "未找到可用自定义图片，等待专辑封面";
-  }catch(RuntimeException unavailable){return "盘面来源暂不可用";}
+   var album=currentAlbumKey(song);
+   var appearance=display.appearanceFor(album);
+   String source=album!=null&&display.albumStyles().containsKey(album)?"专辑设置":"全局默认";
+   String style=switch(appearance.style()){
+    case COLORED_VINYL -> appearance.color().label+"彩胶唱片";
+    case REEL -> appearance.reelColor().label+"卷盘";
+    default -> appearance.style().label;
+   };
+   String description=source+" · "+style;
+   if(!appearance.style().reel()&&coverAvailability.missing(song))description+="（无封面，显示空白盘面）";
+   return new DiscSettings.ArtworkSource(description,DiscSettings.ArtworkKind.GENERATED);
+  }catch(RuntimeException unavailable){return new DiscSettings.ArtworkSource("盘面来源暂不可用");}
  }
  private boolean discResolved(){try{return localDiscs!=null&&discResolved(currentSong());}catch(Exception unavailable){return false;}}
  private boolean discResolved(String song){return localDiscs!=null&&localDiscs.isResolved(song);}
@@ -486,8 +616,10 @@ public final class CdPageProbePlugin extends SpwPlugin {
   if(!running)return;
   try{
    String song=currentSong();if(localDiscs!=null)localDiscs.request(song);boolean changed=false;
+   boolean entryVisible=false;
    synchronized(frames){for(var it=frames.iterator();it.hasNext();){
     Frame frame=it.next().get();if(frame==null){it.remove();continue;}
+    if(frame.presentationVisible())entryVisible=true;
     if(frame.secondary&&frame.nativeRoot!=null&&frame.nativeRoot.isAttached()){
      changed|=frame.observe(song);
      // Bootstrap only when enabled after the host's last completed read.
@@ -495,13 +627,32 @@ public final class CdPageProbePlugin extends SpwPlugin {
      if(coverStatus!=null&&frame.observedSource==null&&frame.ownedCover==null&&coverAvailability.refreshNeeded(song,System.nanoTime()))coverStatus.refreshCurrent();
     }
    }}
+   if(renderWarmupPending&&!entryVisible)warmRenderPath();
+   if(!entryVisible&&reelRasters!=null){
+    var settings=displaySettings.getValue();
+    var appearance=settings.albumStyles().isEmpty()?settings.appearance():settings.appearanceFor(currentAlbumKey(song));
+    if(settings.amount()>0&&appearance.style()==DiscSettings.Style.REEL&&appearance.reelColor()!=DiscSettings.ReelColor.RANDOM)
+     reelRasters.prepare(appearance.reelColor());
+   }
    if(changed){sourceRevision.setValue(sourceRevision.getValue()+1);report("SOURCE_REFRESH");}
   }catch(Exception error){report("SOURCE_OBSERVER_ERROR "+error.getClass().getSimpleName());}
+ }
+ private void warmRenderPath(){
+  renderWarmupPending=false;
+  long started=System.nanoTime();
+  try{
+   RenderWarmup.run(displaySettings.getValue());
+   renderWarmupDone=true;
+   report("RENDER_WARMUP elapsedUs="+elapsedMicros(started));
+  }catch(Exception|LinkageError unavailable){
+   report("RENDER_WARMUP_SKIPPED "+unavailable.getClass().getSimpleName());
+  }
  }
  private void animateFrames(){
   if(!running)return;
   long now=System.nanoTime();
   String song;try{song=currentSong();}catch(Exception unavailable){return;}
+  String cueSnapshot=CuePlaybackTrack.snapshot();
   if(localDiscs!=null){localDiscs.request(song);localDiscs.resolveSlowLookup(song);}
   boolean sourceChanged=false;
   var display=displaySettings.getValue();
@@ -519,21 +670,28 @@ public final class CdPageProbePlugin extends SpwPlugin {
    frame.refreshReady();
    if(frame.nativeRoot==null||!frame.nativeRoot.isAttached()){frame.rotationAngle.setValue(frame.rotation.sample(song,rotate,false,false,now));continue;}
    try{
+    if(frame.entryTiming!=null)frame.entryTiming.clock(now);
     frame.motion.setSpeed(display.motionSpeed());
     if(frame.motion.phase()==DiscTransition.Phase.IDLE){frame.motion.enter();frame.pose.setValue(frame.motion.pose());}
     sourceChanged|=frame.observe(song);
     boolean switched=frame.trackGate.observe(song,now);
-    if(switched&&!frame.motion.closing()&&!frame.motion.finished()){
+    boolean cueChanged=frame.cueTrack.changed(song,cueSnapshot);
+    if((switched||cueChanged)&&!frame.motion.closing()&&!frame.motion.finished()){
+     if(cueChanged){
+      frame.trackGate.request(song,now);
+      frame.rotation.reset();frame.rotationAngle.setValue(0f);
+     }
+     frame.entryTiming=null;
      frame.motion.trackChanged();frame.trackPending.setValue(true);frame.pose.setValue(frame.motion.pose());
-     report("TRACK_ENTRY_PENDING");
+     report(cueChanged?"TRACK_ENTRY_PENDING cue=true":"TRACK_ENTRY_PENDING");
     }
     Object source=frame.passPainter.getValue();
     if(frame.motion.phase()==DiscTransition.Phase.TRACK_WAIT){
      if(frame.trackGate.ready(song,source,frame.fallbackActive||frame.ownedCover!=null||HostCoverBridge.imageReady(source),discResolved(song),now)){
       frame.motion.trackReady(now);frame.trackPending.setValue(false);report("TRACK_ENTRY_START");
      }
-    }else if(source!=null&&source==frame.lastPainted&&Boolean.TRUE.equals(frame.ready.getValue())){
-     // Begin the timeline after this source has made it through a real Canvas pass.
+    }else if(source!=null&&Boolean.TRUE.equals(frame.ready.getValue())){
+     // Start at source and layout readiness, as in v1.9.0.
      frame.motion.ready(now);
     }
     frame.advanceMotion(now);
@@ -549,6 +707,7 @@ public final class CdPageProbePlugin extends SpwPlugin {
   if(sourceChanged)sourceRevision.setValue(sourceRevision.getValue()+1);
  }
  private DiscSettings.AlbumKey currentAlbumKey(String song){
+  if(song==null||song.isBlank())return null;
   try{
    var item=WorkshopApi.playback().getCurrentMediaItem();
    if(item!=null&&Objects.equals(song,item.getPath()))
@@ -556,14 +715,10 @@ public final class CdPageProbePlugin extends SpwPlugin {
   }catch(RuntimeException|LinkageError unavailable){ /* Fall back to the current path. */ }
   return DiscSettings.AlbumKey.of(null,null,null,0,song);
  }
- private DiscSettings.VinylColor resolveVinylColor(DiscSettings.VinylColor color,String song){
+ private DiscSettings.VinylColor resolveVinylColor(DiscSettings.VinylColor color,DiscSettings.AlbumKey album,String song){
   if(color!=DiscSettings.VinylColor.RANDOM)return color;
-  try{
-   var item=WorkshopApi.playback().getCurrentMediaItem();
-   if(item!=null&&Objects.equals(song,item.getPath()))
-    return color.resolve(item.getAlbum(),item.getAlbumArtist(),item.getArtist(),item.getYear(),song,vinylColorSalt);
-  }catch(RuntimeException|LinkageError unavailable){ /* Fall back to the current path. */ }
-  return color.resolve(null,null,null,0,song,vinylColorSalt);
+  return album==null?color.resolve(null,null,null,0,song,vinylColorSalt)
+      :color.resolve(album.album(),album.artist(),album.artist(),album.year(),album.path(),vinylColorSalt);
  }
  private String currentSong(){var item=WorkshopApi.playback().getCurrentMediaItem();return item==null?null:item.getPath();}
  private static long size(LayoutCoordinates c)throws Exception{return (Long)PainterDrawBinding.LAYOUT_SIZE.invoke(c);}
@@ -576,6 +731,7 @@ public final class CdPageProbePlugin extends SpwPlugin {
   if(discSettings!=null){try{discSettings.close();}catch(Exception error){report("SETTINGS_CLOSE_WARNING "+error.getClass().getSimpleName());}discSettings=null;}
   synchronized(frames){for(var ref:frames){Frame frame=ref.get();if(frame!=null)frame.restoreNative();}}
   if(sourceObserver!=null){sourceObserver.stop();sourceObserver=null;}
+  if(reelRasters!=null){reelRasters.close();reelRasters=null;}
   if(localDiscs!=null){localDiscs.close();localDiscs=null;}
   for(int i=handles.size()-1;i>=0;i--)try{handles.get(i).close();}catch(Throwable e){report("UNHOOK_WARNING "+e.getClass().getSimpleName());}
   handles.clear();rawSource.remove();report("STOP SelfDraw disabled; native fallback");

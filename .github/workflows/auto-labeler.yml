@@ -16,47 +16,50 @@ jobs:
           script: |
             const body = (context.payload.issue.body ?? '').replace(/\r\n/g, '\n').trimStart();
             // 只读取 Bug 表单的第一个字段，避免匹配截图说明或问题描述里的文字。
-            const firstField = body.match(/^### ([^\n]+)\n(?:[ \t]*\n)*([^\n]+)/);
-            if (!firstField) return;
-
-            const heading = firstField[1].trim();
-            const answer = firstField[2].trim();
-            if (!answer || answer.startsWith('### ')) return;
-
-            if (heading !== '💻 受影响的平台与渠道 / Affected Platform and Channel') return;
+            const [heading, ...lines] = body.split('\n');
+            if (heading.trim() !== '### 💻 受影响的平台与渠道 / Affected Platform and Channel') return;
 
             const microsoftStore = { name: 'Windows · Microsoft Store', color: '0366d6' };
-            const steamWindows = { name: 'Windows · Steam', color: '1d76db' };
+            const steamWindows = { name: 'Windows · Steam', color: '6f42c1' };
             const steamLinux = { name: 'Linux · Steam', color: '0e8a16' };
             const labelsByAnswer = new Map([
               ['Windows · 微软商店 / Windows · Microsoft Store', microsoftStore],
               ['Windows · Steam', steamWindows],
               ['Linux · Steam', steamLinux],
             ]);
-            const channels = answer.split(',').map(channel => channel.trim());
-            const labels = [...new Set(channels)].map(channel => labelsByAnswer.get(channel));
-            if (labels.some(label => !label)) return;
+            const labels = new Set();
+            for (const line of lines) {
+              if (line.startsWith('### ')) break;
+              const checked = line.match(/^\s*-\s+\[[xX]\]\s+(.+?)\s*$/);
+              const label = checked && labelsByAnswer.get(checked[1]);
+              if (label) labels.add(label);
+            }
+            if (labels.size === 0) return;
 
             const repository = context.repo;
             const issues = github.rest.issues;
             for (const label of labels) {
               const lookup = { ...repository, name: label.name };
+              let existing;
               // 首次使用时创建标签。并行提交可能已创建同名标签。
               try {
-                await issues.getLabel(lookup);
+                existing = await issues.getLabel(lookup);
               } catch (error) {
                 if (error.status !== 404) throw error;
                 try {
                   await issues.createLabel({ ...repository, ...label });
                 } catch (creationError) {
                   if (creationError.status !== 422) throw creationError;
-                  await issues.getLabel(lookup);
+                  existing = await issues.getLabel(lookup);
                 }
+              }
+              if (existing && existing.data.color.toLowerCase() !== label.color) {
+                await issues.updateLabel({ ...lookup, color: label.color });
               }
             }
 
             await issues.addLabels({
               ...repository,
               issue_number: context.issue.number,
-              labels: labels.map(label => label.name),
+              labels: [...labels].map(label => label.name),
             });

@@ -112,17 +112,31 @@ final class RootRenderer {
  }
  // Populate the same caches used by the reveal, using the measured size.
  static void prepareDefaultDisc(DrawScope scope,int amount,float aspect,boolean trimmed,
-      DiscSettings.Style style,DiscSettings.VinylColor vinylColor,DiscSettings.ReelColor reelColor)throws Exception{
+      DiscSettings.Style style,DiscSettings.VinylColor vinylColor,DiscSettings.ReelColor reelColor,
+      Supplier<Path> paths)throws Exception{
   long size=(Long)SIZE.invoke(scope);
   float side=Math.min(y(size),x(size)/DiscExposure.widthFactor(amount));
   if(side<=0||!Float.isFinite(side))return;
   float radius=(trimmed?Math.min(side,fittedHeight(side,aspect)):side)*.49f;
   if(style.reel()){
-   reelFinish(radius,SkiaBackedPath_skikoKt::Path,reelColor);
+   reelFinish(radius,paths,reelColor);
    ReelWordmark.prepare(style==DiscSettings.Style.REEL);
   }else if(style!=DiscSettings.Style.CD){
-   vinylFinish(radius,SkiaBackedPath_skikoKt::Path,vinylColor);
+   vinylFinish(radius,paths,vinylColor);
   }else discFinish(radius);
+ }
+ // For a generated disc behind the sleeve, the reflection only samples a
+ // bottom strip. Skip that disc draw until its circle can touch the strip to
+ // the right of the sleeve. Include room for an antialiased edge.
+ static float reflectedExposure(DrawScope scope,float exposure,int amount,float stripTop)throws Exception{
+  if(exposure<=0)return exposure;
+  long size=(Long)SIZE.invoke(scope);
+  float side=Math.min(y(size),x(size)/DiscExposure.widthFactor(amount));
+  if(side<=0||!Float.isFinite(side))return exposure;
+  float dx=Math.max(0,side-DiscExposure.center(side,exposure,amount));
+  float dy=Math.max(0,stripTop-side*.5f);
+  float paddedRadius=side*.49f+2f;
+  return dx*dx+dy*dy>paddedRadius*paddedRadius?0f:exposure;
  }
  static float fittedWidth(float side,float aspect){return side*Math.min(1f,aspect);}
  static float fittedHeight(float side,float aspect){return side/Math.max(1f,aspect);}
@@ -304,6 +318,11 @@ final class RootRenderer {
  private static ReelFinish reelFinish(float radius,Supplier<Path> paths,DiscSettings.ReelColor color)throws Exception{
   ReelFinish finish=cachedReel;
   if(finish!=null&&finish.radius()==radius&&finish.color()==color)return finish;
+  finish=buildReelFinish(radius,paths,color);
+  cachedReel=finish;
+  return finish;
+ }
+ private static ReelFinish buildReelFinish(float radius,Supplier<Path> paths,DiscSettings.ReelColor color)throws Exception{
   Path windows=paths.get();
   float outer=radius*.866f,inner=radius*.435f;
   for(int middle=90;middle<360;middle+=120){
@@ -380,13 +399,11 @@ final class RootRenderer {
       new int[]{tone(color.trim,8),tone(color.trim,-26),tone(color.trim,-12),tone(color.trim,22),
                 tone(color.trim,48),tone(color.trim,32),tone(color.trim,-14),tone(color.trim,8)}),pack(0,0));
   // The face overlaps the metal's inner edge (.970r) but stops beneath the opaque flange.
-  finish=new ReelFinish(radius,color,oval(paths,radius),oval(paths,radius*.985f),windows,oval(paths,radius*.057f),
+  return new ReelFinish(radius,color,oval(paths,radius),oval(paths,radius*.985f),windows,oval(paths,radius*.057f),
       stroke(radius*.009f),stroke(radius*.0024f),tape,tapeGrooves,tapeEdges,reelInk(0x76140c08),reelInk(0x46c99469),hubGlass,glassReflection,glassInnerEdge,tapeSheen,stroke(radius*.036f),windowShade,
       reelInk(0x80100b08),reelInk(0xae080503),reelInk(0x94d7c7b2),reelMark(paths),
       stroke(radius*.028f),stroke(radius*.038f),flangeMetal,flangeBevel,hubBevel,hubRecess,spindleBevel,solidFace,solidTrim,glassBevel,
       stroke(radius*.020f),stroke(radius*.035f));
-  cachedReel=finish;
-  return finish;
  }
  private static int tone(int rgb,int delta){
   return 0xff000000|channel(rgb>>16,delta)<<16|channel(rgb>>8,delta)<<8|channel(rgb,delta);
@@ -489,7 +506,14 @@ final class RootRenderer {
   return stops;
  }
  private static void reelFace(DrawScope scope,float cx,float cy,float radius,Supplier<Path> paths,Source artwork,float aspect,float angle,DiscSettings.ReelColor color)throws Exception{
-  ReelFinish reel=reelFinish(radius,paths,color);
+  reelFace(scope,cx,cy,radius,reelFinish(radius,paths,color),artwork,aspect,angle,color);
+ }
+ static void bakeSolidReel(DrawScope scope,float radius,Supplier<Path> paths,DiscSettings.ReelColor color)throws Exception{
+  // Shader brushes retain per-canvas state. A worker owns a fresh finish.
+  var finish=buildReelFinish(radius,paths,color);
+  reelFace(scope,radius,radius,radius,finish,null,1,0,color);
+ }
+ private static void reelFace(DrawScope scope,float cx,float cy,float radius,ReelFinish reel,Source artwork,float aspect,float angle,DiscSettings.ReelColor color)throws Exception{
   Canvas canvas=scope.getDrawContext().getCanvas();canvas.save();
   long center=pack(0,0);
   try{

@@ -33,10 +33,10 @@ public final class DiscOrderDialog implements AutoCloseable {
  static final Font UI_FONT=chooseFont();
  private static volatile DiscOrderDialog active;
  private final DiscSettings settings;
- private final Supplier<String> artworkSource;
+ private final Supplier<DiscSettings.ArtworkSource> artworkSource;
  private JDialog window;
 
- DiscOrderDialog(DiscSettings settings,Supplier<String> artworkSource){
+ DiscOrderDialog(DiscSettings settings,Supplier<DiscSettings.ArtworkSource> artworkSource){
   this.settings=settings;
   this.artworkSource=artworkSource;
   active=this;
@@ -76,7 +76,7 @@ public final class DiscOrderDialog implements AutoCloseable {
   dialog.setVisible(true);
  }
 
- static JComponent content(List<String> order,Predicate<List<String>> saveOrder,Runnable close,Supplier<String> artworkSource){
+ static JComponent content(List<String> order,Predicate<List<String>> saveOrder,Runnable close,Supplier<DiscSettings.ArtworkSource> artworkSource){
   var model=new DefaultListModel<String>();
   model.addAll(order);
   var list=new JList<>(model);
@@ -157,16 +157,29 @@ public final class DiscOrderDialog implements AutoCloseable {
   content.setBorder(BorderFactory.createEmptyBorder(16,24,14,24));
   content.add(heading,BorderLayout.NORTH);
   content.add(list,BorderLayout.CENTER);
-  var status=label("当前曲目盘面："+artworkSource.get(),14,Font.PLAIN,MUTED);
-  var footer=new JPanel(new BorderLayout());
+  var status=label("",15,Font.BOLD,TEXT);
+  status.putClientProperty("html.disable",Boolean.TRUE);
+  var orderEffect=label(" ",14,Font.PLAIN,new Color(0xffcf87));
+  var details=new JPanel(new GridLayout(0,1,0,4));
+  details.setOpaque(false);
+  details.add(status);
+  details.add(orderEffect);
+  var footer=new JPanel(new BorderLayout(0,10));
   footer.setOpaque(false);
-  footer.add(status,BorderLayout.NORTH);
+  footer.add(details,BorderLayout.NORTH);
   footer.add(actions,BorderLayout.SOUTH);
   content.add(footer,BorderLayout.SOUTH);
-  var refresh=new Timer(500,event->status.setText("当前曲目盘面："+artworkSource.get()));
+  Runnable refreshStatus=()->{
+   var source=artworkSource.get();
+   status.setText("当前曲目盘面："+source.description());
+   orderEffect.setText(source.kind()==DiscSettings.ArtworkKind.GENERATED
+       ?"当前曲目没有可用的自定义盘面，调整顺序对当前曲目无效。":" ");
+  };
+  refreshStatus.run();
+  var refresh=new Timer(500,event->refreshStatus.run());
   content.addHierarchyListener(event->{
    if((event.getChangeFlags()&HierarchyEvent.SHOWING_CHANGED)==0)return;
-   if(content.isShowing())refresh.start();else refresh.stop();
+   if(content.isShowing()){refreshStatus.run();refresh.start();}else refresh.stop();
   });
   content.registerKeyboardAction(event->close.run(),KeyStroke.getKeyStroke("ESCAPE"),JComponent.WHEN_IN_FOCUSED_WINDOW);
   content.addHierarchyListener(event->{

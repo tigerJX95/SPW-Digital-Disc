@@ -2,6 +2,9 @@ package io.github.tigerjx95.spwcdprobe;
 import androidx.compose.ui.Modifier;
 import androidx.compose.foundation.layout.*;
 import androidx.compose.foundation.ClickableKt;
+import androidx.compose.ui.graphics.GraphicsLayerModifierKt;
+import androidx.compose.ui.layout.LayoutCoordinates;
+import androidx.compose.ui.node.NodeCoordinator;
 import androidx.compose.ui.unit.*;
 import java.lang.reflect.Method;
 import kotlin.Unit;
@@ -22,6 +25,18 @@ final class CanvasWidget {
    catch(Exception e){throw new IllegalStateException(e);}
   });
   Modifier sized=(Modifier)SIZE.invoke(null,offset,plan.width()/density,plan.height()/density);
-  return (Modifier)CLICK.invoke(null,sized,null,null,true,null,null,click);
+  Modifier clickable=(Modifier)CLICK.invoke(null,sized,null,null,true,null,null,click);
+  // Give the Canvas its own recording layer so animation invalidations
+  // don't fall through to the enclosing player layer. Keep its full bounds.
+  return GraphicsLayerModifierKt.graphicsLayer(clickable,layer->Unit.INSTANCE);
+ }
+ static boolean hasDrawingLayer(LayoutCoordinates coordinates){
+  return coordinates instanceof NodeCoordinator coordinator&&coordinator.isAttached()
+      &&coordinator.getLayoutNode().getInnerLayerCoordinator$ui()!=null;
+ }
+ static boolean requestDraw(LayoutCoordinates coordinates){
+  if(!(coordinates instanceof NodeCoordinator coordinator)||!coordinator.isAttached())return false;
+  coordinator.getLayoutNode().invalidateLayer$ui();
+  return true;
  }
 }

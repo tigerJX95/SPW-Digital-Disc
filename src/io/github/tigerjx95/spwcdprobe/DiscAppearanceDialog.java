@@ -4,50 +4,164 @@ import java.awt.*;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.util.ArrayList;
+import java.util.Objects;
+import java.util.concurrent.ExecutionException;
+import java.util.function.Consumer;
 import java.util.function.Predicate;
+import java.util.function.Supplier;
 import javax.swing.*;
 import static io.github.tigerjx95.spwcdprobe.DiscOrderDialog.*;
 
 public final class DiscAppearanceDialog implements AutoCloseable {
  private static volatile DiscAppearanceDialog active;
  private final DiscSettings settings;
+ private final Supplier<DiscSettings.AlbumKey> playingAlbum;
+ private final Supplier<DiscSettings.ArtworkSource> artworkSource;
  private JDialog window;
+ private boolean saving;
+ private DiscSettings.AlbumKey windowAlbum;
 
- DiscAppearanceDialog(DiscSettings settings){
+ DiscAppearanceDialog(DiscSettings settings,Supplier<DiscSettings.AlbumKey> playingAlbum,Supplier<DiscSettings.ArtworkSource> artworkSource){
   this.settings=settings;
+  this.playingAlbum=playingAlbum;
+  this.artworkSource=artworkSource;
   active=this;
  }
 
- public static void open(){
+ public static void open(){open(false);}
+ public static void openAlbum(){open(true);}
+ private static void open(boolean albumScope){
   var editor=active;
   if(editor!=null)SwingUtilities.invokeLater(()->{
-   if(active==editor&&!GraphicsEnvironment.isHeadless())editor.show();
+   if(active==editor&&!GraphicsEnvironment.isHeadless())editor.show(albumScope);
   });
  }
 
- private void show(){
-  if(window!=null){window.toFront();return;}
+ private void show(boolean albumScope){
+  if(saving&&window!=null){window.toFront();return;}
+  DiscSettings.AlbumKey album=null;
+  if(albumScope){
+   try{album=playingAlbum.get();}
+   catch(RuntimeException|LinkageError unavailable){ /* Playback is not available. */ }
+   if(album==null||album.album()==null){
+    var owner=KeyboardFocusManager.getCurrentKeyboardFocusManager().getActiveWindow();
+    JOptionPane.showMessageDialog(owner,"请先播放带有专辑信息的曲目。","当前专辑盘面样式",JOptionPane.INFORMATION_MESSAGE);
+    return;
+   }
+  }
+  if(window!=null){
+   if(Objects.equals(windowAlbum,album)){window.toFront();return;}
+   window.dispose();
+  }
   var owner=KeyboardFocusManager.getCurrentKeyboardFocusManager().getActiveWindow();
-  var dialog=new JDialog(owner,"默认盘面样式",Dialog.ModalityType.MODELESS);
+  String title=albumScope?"当前专辑盘面样式":"默认盘面样式";
+  var dialog=new JDialog(owner,title,Dialog.ModalityType.MODELESS);
   window=dialog;
+  windowAlbum=album;
   dialog.setUndecorated(true);
-  dialog.getAccessibleContext().setAccessibleName("默认盘面样式");
+  dialog.getAccessibleContext().setAccessibleName(title);
   dialog.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
   dialog.addWindowListener(new WindowAdapter(){
    @Override public void windowClosed(WindowEvent event){if(window==dialog)window=null;}
   });
-  dialog.setContentPane(content(settings.appearance(),settings::saveAppearance,dialog::dispose));
+  dialog.setContentPane(albumScope?albumContent(dialog,album):
+      content(settings.appearance(),value->saveInBackground(dialog,()->settings.saveAppearance(value),"无法保存盘面样式。"),
+          ()->{if(!saving)dialog.dispose();},"默认盘面样式",null,null,null));
   dialog.pack();
   dialog.setLocationRelativeTo(owner);
   dialog.setVisible(true);
  }
 
+ private JComponent albumContent(JDialog dialog,DiscSettings.AlbumKey album){
+  var saved=settings.albumAppearance(album);
+  var reset=new ActionButton("恢复默认",false);
+  reset.setEnabled(saved!=null);
+  reset.addActionListener(event->saveInBackground(dialog,()->settings.saveAlbumAppearance(album,null),"无法清除专辑设置。"));
+  String description=album.album()+(album.artist()==null?"":" · "+album.artist());
+  return content(saved==null?settings.appearance():saved,
+      value->saveInBackground(dialog,()->settings.saveAlbumAppearance(album,value),"无法保存盘面样式。"),
+      ()->{if(!saving)dialog.dispose();},"当前专辑盘面样式",description,artworkSource.get(),reset);
+ }
+
+ private void saveInBackground(JDialog dialog,Supplier<Boolean> save,String failureMessage){
+  if(saving)return;
+  saving=true;
+  dialog.setDefaultCloseOperation(WindowConstants.DO_NOTHING_ON_CLOSE);
+  var controls=new ArrayList<AbstractButton>();
+  disableButtons(dialog.getContentPane(),controls);
+  dialog.setCursor(Cursor.getPredefinedCursor(Cursor.WAIT_CURSOR));
+  runSave(save,saved->{
+   saving=false;
+   if(active!=this||!dialog.isDisplayable())return;
+   if(saved){dialog.dispose();return;}
+   dialog.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
+   controls.forEach(button->button.setEnabled(true));
+   dialog.setCursor(Cursor.getDefaultCursor());
+   JOptionPane.showMessageDialog(dialog,failureMessage,"保存失败",JOptionPane.ERROR_MESSAGE);
+  });
+ }
+
+ private static void disableButtons(Container parent,ArrayList<AbstractButton> controls){
+  for(var child:parent.getComponents()){
+   if(child instanceof AbstractButton button&&button.isEnabled()){
+    controls.add(button);
+    button.setEnabled(false);
+   }else if(child instanceof Container container)disableButtons(container,controls);
+  }
+ }
+
+ static void runSave(Supplier<Boolean> save,Consumer<Boolean> completion){
+  new SwingWorker<Boolean,Void>(){
+   @Override protected Boolean doInBackground(){return save.get();}
+   @Override protected void done(){
+    boolean saved=false;
+    try{saved=get();}
+    catch(InterruptedException interrupted){Thread.currentThread().interrupt();}
+    catch(ExecutionException failed){ /* Report failure on the EDT. */ }
+    completion.accept(saved);
+   }
+  }.execute();
+ }
+
+ static JLabel plainAlbumLabel(String description){
+  var label=label("",14,Font.PLAIN,new Color(0xff999f));
+  label.putClientProperty("html.disable",Boolean.TRUE);
+  int length=description.codePointCount(0,description.length());
+  label.setText(length>48?description.substring(0,description.offsetByCodePoints(0,48))+"…":description);
+  return label;
+ }
+
  static JComponent content(DiscSettings.Appearance initial,Predicate<DiscSettings.Appearance> save,Runnable close){
+  return content(initial,value->{
+   if(save.test(value))close.run();
+  },close,"默认盘面样式",null,null,null);
+ }
+ private static JComponent content(DiscSettings.Appearance initial,Consumer<DiscSettings.Appearance> save,Runnable close,
+      String title,String subtitle,DiscSettings.ArtworkSource artwork,JButton scopeAction){
   var panel=new JPanel(new BorderLayout(0,14));
   panel.setBackground(new Color(0x28343d));
   panel.setBorder(BorderFactory.createCompoundBorder(BorderFactory.createLineBorder(new Color(0x47535c)),
       BorderFactory.createEmptyBorder(20,24,16,24)));
-  panel.add(label("默认盘面样式",22,Font.BOLD,TEXT),BorderLayout.NORTH);
+  var header=new JPanel(new BorderLayout(12,4));
+  header.setOpaque(false);
+  header.add(label(title,22,Font.BOLD,TEXT),BorderLayout.CENTER);
+  if(scopeAction!=null)header.add(scopeAction,BorderLayout.EAST);
+  if(subtitle!=null){
+   var albumLabel=plainAlbumLabel(subtitle);
+   albumLabel.setToolTipText("<html>"+subtitle.replace("&","&amp;").replace("<","&lt;").replace(">","&gt;")+"</html>");
+   var details=new JPanel(new GridLayout(0,1,0,4));
+   details.setOpaque(false);
+   details.add(albumLabel);
+   String source="打开时的盘面："+artwork.description();
+   var sourceLabel=label(source.length()>52?source.substring(0,52)+"…":source,14,Font.PLAIN,MUTED);
+   sourceLabel.setToolTipText(source);
+   details.add(sourceLabel);
+   if(artwork.customImage()){
+    details.add(label("自定义图片优先。没有可用的自定义图片时，才会显示所设样式。",14,Font.PLAIN,new Color(0xffcf87)));
+   }
+   header.add(details,BorderLayout.SOUTH);
+  }
+  panel.add(header,BorderLayout.NORTH);
 
   var fields=new JPanel();
   fields.setOpaque(false);
@@ -139,8 +253,7 @@ public final class DiscAppearanceDialog implements AutoCloseable {
    var color=DiscSettings.VinylColor.valueOf(colors.getSelection().getActionCommand());
    if(style.reel())style=DiscSettings.Style.valueOf(reelOptions.getSelection().getActionCommand());
    var reelColor=DiscSettings.ReelColor.valueOf(reelColors.getSelection().getActionCommand());
-   if(save.test(new DiscSettings.Appearance(style,color,reelColor)))close.run();
-   else JOptionPane.showMessageDialog(panel,"无法保存默认盘面样式。","保存失败",JOptionPane.ERROR_MESSAGE);
+   save.accept(new DiscSettings.Appearance(style,color,reelColor));
   });
   actions.add(cancel);
   actions.add(confirm);

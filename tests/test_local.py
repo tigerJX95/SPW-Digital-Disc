@@ -8,6 +8,7 @@ from pathlib import Path
 root = Path(__file__).resolve().parent.parent
 os.chdir(root)
 host = Path(sys.argv[1]).resolve()
+first_reveal_only = '--first-reveal' in sys.argv[2:]
 java_home = Path(os.environ['JAVA_HOME'])
 suffix = '.exe' if os.name == 'nt' else ''
 java = java_home / 'bin' / ('java' + suffix)
@@ -22,18 +23,23 @@ subprocess.run([str(javac), '--release', '21', '-encoding', 'UTF-8', '-cp', clas
                 '-d', str(output), *map(str, sorted(root.glob('tests/*.java')))], check=True)
 classpath = os.pathsep.join(map(str, [output, classes, host]))
 tests = [
-    'CoverAvailabilityTest', 'BlankDiscTest', 'CoverSelectionTest', 'CoverRecoveryTest', 'DiscTransitionTest', 'TrackEntryGateTest', 'GeneratedDiscFinishTest',
+    'FirstRevealPreparationTest', 'EntryTimingTest', 'CoverHandoffTest', 'ReelEntryRasterTest', 'CoverAvailabilityTest', 'BlankDiscTest', 'CoverSelectionTest', 'CoverRecoveryTest', 'DiscTransitionTest', 'TrackEntryGateTest', 'GeneratedDiscFinishTest',
     'LocalDiscServiceTest', 'LocalDiscFixTest', 'DiscArtworkTest', 'HighResolutionArtworkTest', 'ReturnHandoffTest', 'CrossAlbumCacheTest', 'DiscGenerationTest', 'LocalDiscReuseTest', 'LocalDiscRetryTest',
     'ProductionResumeTest', 'ProductionLayoutRecoveryTest', 'ObservableHandoffTest', 'ProductionRotationHandoffTest',
     'HostEntryTest', 'HostImageDrawTest', 'RootRasterTest', 'VinylRendererTest', 'CoverDiscTest',
     'LocalDiscRasterTest', 'DiscMotionRasterTest', 'ReflectionTest', 'RevealOrderTest',
     'RevealCycleTest', 'DiscExposureTest', 'DiscSettingsTest', 'PreferenceSchemaTest', 'FrontSettingsTest', 'FrontRendererTest', 'FrontDiscMotionTest', 'DiscRotationTest', 'RotationSettingsTest', 'RotationRendererTest', 'DiscMotionContinuityTest', 'TimedDiscMotionRasterTest', 'RotationHandoffTest', 'HostCompatibilityTest', 'PluginSourceMetadataTest', 'HostBindingsTest', 'DynamicHostBindingsTest',
 ]
+if first_reveal_only:
+    tests = ['FirstRevealPreparationTest', 'ReflectionTest', 'EntryTimingTest', 'CoverHandoffTest', 'ReelEntryRasterTest']
 qa = root / 'build/qa'
 qa.mkdir(parents=True, exist_ok=True)
 for test in tests:
     subprocess.run([str(java), '-Djava.awt.headless=true', '-cp', classpath,
                     'io.github.tigerjx95.spwcdprobe.' + test, str(qa / (test + '.png'))], check=True)
+if first_reveal_only:
+    print('PASS: first-reveal preparation gate. Run the native SPW checks before release.')
+    sys.exit(0)
 live = root / 'build/tests-live'
 live.mkdir(parents=True, exist_ok=True)
 subprocess.run([str(javac), '--release', '21', '-encoding', 'UTF-8', '-cp', classpath,

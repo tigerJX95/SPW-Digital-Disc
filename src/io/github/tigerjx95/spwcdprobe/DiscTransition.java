@@ -2,6 +2,7 @@ package io.github.tigerjx95.spwcdprobe;
 
 /** UI-thread, monotonic-time choreography. No file loading or host calls in draw. */
 final class DiscTransition {
+ static final float COVER_START_SCALE=.94f;
  enum Phase { IDLE, WAITING, TRACK_WAIT, COVER, OPENING, OPEN, CLOSING, FINISHED }
  record Pose(float exposed,float scale,float centered) {}
  private Phase phase=Phase.IDLE;
@@ -18,7 +19,8 @@ final class DiscTransition {
  Pose pose(){return new Pose(exposure,scale,centered);}
  boolean closing(){return phase==Phase.CLOSING;}
  boolean finished(){return phase==Phase.FINISHED;}
- void enter(){reset();phase=Phase.WAITING;scale=.94f;centered=1;pageEntry=true;}
+ boolean pageEntryAnimating(){return pageEntry&&(phase==Phase.COVER||phase==Phase.OPENING);}
+ void enter(){reset();phase=Phase.WAITING;scale=COVER_START_SCALE;centered=1;pageEntry=true;}
  void ready(long now){if(phase==Phase.WAITING){phase=Phase.COVER;started=now;coverDuration=speed.duration(240_000_000L);openingDuration=speed.duration(700_000_000L);}}
  void trackChanged(){
   if(closing()||finished())return;
@@ -35,7 +37,7 @@ final class DiscTransition {
   if(!visibleDisc||phase==Phase.IDLE||phase==Phase.WAITING||phase==Phase.TRACK_WAIT){phase=Phase.FINISHED;exposure=0;scale=1;done.run();return;}
   completion=done;
   // The cover has finished enlarging at the first opening frame, before any disc travel.
-  if(pageEntry&&exposure==0&&scale>.94f){
+  if(pageEntry&&exposure==0&&scale>COVER_START_SCALE){
    coverOnlyReturn=true;
    returnScale=scale;
    started=now;
@@ -64,7 +66,7 @@ final class DiscTransition {
  boolean tick(long now){
   float old=exposure,oldScale=scale,oldCentered=centered;Phase before=phase;
   if(phase==Phase.COVER){
-   float t=unit(now-started,coverDuration);scale=.94f+.06f*smoother(t);
+   float t=unit(now-started,coverDuration);scale=COVER_START_SCALE+.06f*smoother(t);
    if(t>=1){phase=Phase.OPENING;started+=coverDuration;}
   }
   if(phase==Phase.OPENING){
@@ -75,8 +77,8 @@ final class DiscTransition {
    long elapsed=now-started;
    if(coverOnlyReturn){
     float t=unit(elapsed,duration);
-    scale=returnScale+(.94f-returnScale)*smoother(t);
-    if(t>=1){scale=.94f;finish();}
+    scale=returnScale+(COVER_START_SCALE-returnScale)*smoother(t);
+    if(t>=1){scale=COVER_START_SCALE;finish();}
    }else if(elapsed<brakeDuration){
     double u=unit(elapsed,brakeDuration);
     exposure=Math.min(closeFrom,brakeFrom+(float)(brakeVelocity*brakeDuration/1_000_000_000.0*(u-u*u+u*u*u/3)));
