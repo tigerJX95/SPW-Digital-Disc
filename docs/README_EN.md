@@ -130,7 +130,7 @@ Only the disc rotates; the cover stays upright and the reflection shares the ang
 
 Verified on physical machines:
 
-| SPW channel | Operating system | V1.8.0 result |
+| SPW channel | Operating system | V1.11.0 result |
 | --- | --- | --- |
 | Microsoft Store | Windows | Passed |
 | Steam | Windows | Passed |
