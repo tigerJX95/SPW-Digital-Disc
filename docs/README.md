@@ -131,7 +131,7 @@ https://github.com/user-attachments/assets/8a289172-d79b-4e2e-9ba2-c7dc9ee5d86c
 | 1.19.0 Microsoft Store | 已适配 | 48 项通过 |
 | 1.19.3 Microsoft Store | 已适配 | 48 项通过 |
 
-**V1.8.0 实机验证**
+**V1.11.0 实机验证**
 
 | SPW 渠道 | 系统 | 结果 |
 | --- | --- | --- |
