@@ -164,6 +164,45 @@ public class DiscSettingsTest {
   }
  }
 
+ private static void orderMigrationAndFailedWrite()throws Exception{
+  Path file=Files.createTempDirectory("disc-order-migration").resolve("config.json");
+  var runtime=helper(file);
+  var oldOrder=List.of("disc.jpg","disc.png","cd.jpg","cd.png");
+  var newOrder=List.of("cd.jpg","disc.png","cd.png","disc.jpg");
+  String original=String.join(",",oldOrder);
+  runtime.set(DiscSettings.LOCAL_NAMES_KEY,original);
+  check(runtime.save(),"prior release can persist a custom search order");
+  var staleNative=helper(file);
+  var revisions=new ArrayList<DiscSettings.Values>();
+  var manager=new Manager(file,runtime);
+  try(var settings=new DiscSettings(manager,revisions::add)){
+   check(settings.order().equals(oldOrder)&&manager.appearance.get(DiscSettings.LOCAL_NAMES_KEY,"").equals(original),
+       "legacy lookup order migrates on start");
+   check(settings.saveOrder(newOrder),"new lookup order saves to the plugin file");
+   staleNative.set(DiscExposure.KEY,75f);check(staleNative.save(),"native slider saves a stale runtime snapshot");
+   manager.fire(staleNative);flush();
+   check(revisions.getLast().amount()==75&&revisions.getLast().localNames().equals(newOrder),
+       "native file changes still apply while the independent order survives");
+  }
+  var restarted=new Manager(file,helper(file));
+  var failing=(ConfigHelper)java.lang.reflect.Proxy.newProxyInstance(ConfigHelper.class.getClassLoader(),
+      new Class<?>[]{ConfigHelper.class},(proxy,method,args)->{
+       if(method.getName().equals("save"))throw new IllegalStateException("injected write failure");
+       return method.invoke(restarted.appearance,args);
+      });
+  try(var settings=new DiscSettings(new Manager(file,restarted.helper){
+   @Override public ConfigHelper getConfig(String name){
+    return name.equals(DiscSettings.APPEARANCE_CONFIG)?failing:super.getConfig(name);
+   }
+  },value->check(value.localNames().equals(newOrder),"restart uses the independent order"))){
+   check(!settings.saveOrder(oldOrder)&&settings.order().equals(newOrder),
+       "a throwing save leaves the editor and published order on the saved value");
+   check(restarted.appearance.get(DiscSettings.LOCAL_NAMES_KEY,"").equals(String.join(",",newOrder)),
+       "a throwing save also restores the helper's in-memory value");
+  }
+  System.out.println("PASS lookup order migration, stale host snapshot isolation and exception rollback");
+ }
+
  public static void main(String[] args)throws Exception{
   Path file=Files.createTempDirectory("disc-settings").resolve("config.json");
   ConfigHelper config=helper(file);Manager manager=new Manager(file,config);var values=new ArrayList<Integer>();
@@ -184,8 +223,9 @@ public class DiscSettingsTest {
   late.accept(config);flush();check(values.size()==before&&manager.listeners.isEmpty()&&manager.closes==1,"close removes listener, closes owned manager and ignores queued/late updates");
   settings.close();check(manager.closes==1,"idempotent close");
   Manager restored=new Manager(file,helper(file));var restart=new ArrayList<Integer>();
-  try(DiscSettings next=new DiscSettings(restored,v->{restart.add(v.amount());check(v.localNames().getFirst().equals("disc.png"),"restore ordered filenames");})){check(restart.equals(List.of(100)),"restart restores saved exposure and filenames rather than unsaved slider changes");}
+  try(DiscSettings next=new DiscSettings(restored,v->{restart.add(v.amount());check(v.localNames().getFirst().equals("disc.png"),"restore ordered filenames");})){check(restart.equals(List.of(75)),"saving search priority leaves unsaved runtime settings out of the host file");}
   appearanceSurvivesNativeSliderSave();
+  orderMigrationAndFailedWrite();
   albumOverridesSurviveRestart();
   largeAlbumSettingsSaveWithoutBlockingUi();
   var random=new DiscSettings.ReelRandom();

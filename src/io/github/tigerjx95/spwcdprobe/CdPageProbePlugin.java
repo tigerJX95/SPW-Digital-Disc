@@ -3,6 +3,7 @@ import androidx.compose.runtime.*;
 import androidx.compose.ui.Modifier;
 import androidx.compose.ui.Alignment;
 import androidx.compose.ui.draw.DrawModifierKt;
+import androidx.compose.ui.geometry.Rect;
 import androidx.compose.ui.layout.*;
 import androidx.compose.ui.platform.CompositionLocalsKt;
 import androidx.compose.ui.unit.Density;
@@ -12,6 +13,7 @@ import com.xuncorp.spw.workshop.api.*;
 import com.xuncorp.spw.workshop.api.hook.*;
 import com.xuncorp.voxzen.ui.component.PlayerSheetState;
 import kotlin.Unit;
+import kotlin.coroutines.Continuation;
 import kotlin.jvm.functions.Function0;
 import java.lang.ref.WeakReference;
 import java.nio.file.*;
@@ -38,10 +40,18 @@ public final class CdPageProbePlugin extends SpwPlugin {
     return thread;
    },new ThreadPoolExecutor.DiscardPolicy());
  private static final long LOG_MAX_BYTES=256L*1024;
+ private static final long NATIVE_RETURN_TIMEOUT_NS=400_000_000L;
+ private static final long NATIVE_RETURN_ALIGNMENT_LIMIT_NS=500_000_000L;
+ private static final long ENTRY_FRAME_TIMEOUT_NS=500_000_000L;
  private volatile boolean running;
  private boolean renderWarmupPending, renderWarmupDone;
- private int entriesTimed;
- private ReelEntryRaster reelRasters;
+ private final EntryTiming.Series entryTimings=new EntryTiming.Series();
+ private volatile GeneratedCdRaster generatedCdRaster;
+ private volatile DiscSurfaceRaster<DiscSettings.ReelColor> reelRasters;
+ private volatile DiscSurfaceRaster<DiscSettings.ReelColor> reelTapeRaster;
+ private volatile DiscSurfaceRaster<DiscSettings.VinylColor> vinylSurfaceRaster;
+ private volatile WarmupViewport warmupViewport;
+ private volatile PreparedAppearance preparedAppearance;
  private javax.swing.Timer sourceObserver,animationClock;
  private final MutableState<Long> sourceRevision=state(0L);
  private final DiscSettings.ReelRandom reelRandom=new DiscSettings.ReelRandom();
@@ -52,6 +62,14 @@ public final class CdPageProbePlugin extends SpwPlugin {
  private DiscSettings discSettings;
  private final PlaybackStateReader playbackState=new PlaybackStateReader();
  private record Viewport(int width,int height){}
+ private record WarmupViewport(Viewport size,float density){
+  RenderWarmup.Target target(int amount){
+   var plan=SelfDrawLayout.fit(size.width(),size.height(),density,true,amount);
+   return RenderWarmup.Target.fromLayout(plan,density,amount);
+  }
+ }
+ private record PreparedAppearance(DiscSettings.Appearance appearance,RootRenderer.Finishes finishes){}
+ private record CoverOrigin(Viewport viewport,Rect bounds){}
  record DrawCover(Object painter, DiscImage cover, float exposed) {}
  private final class Frame {
   final MutableState<Viewport> viewport=state(new Viewport(0,0));
@@ -59,15 +77,30 @@ public final class CdPageProbePlugin extends SpwPlugin {
   final MutableState<Object> rejectedSource=state(null);
   final MutableState<Boolean> ready=state(false);
   volatile LayoutCoordinates nativeRoot;
+  LayoutCoordinates viewportRoot;
   LayoutCoordinates widgetRoot;
   float widgetWidth,widgetHeight;
   PlayerSheetState sheet;
-  boolean renderAllowed=true,failed,suppressionApplied,secondary;
+  boolean renderAllowed=true,failed,suppressionApplied,secondary,nativeLyrics;
   Object lastPainted;
   boolean revealMeasured, slowEntryDrawLogged;
+  boolean spinMeasured;
+  long previousSpinDraw;
   EntryTiming entryTiming;
+  final MutableState<Boolean> entryFramesRequested=state(false);
+  Object entryClockOwner;
+  long lastEntryFrame;
+  boolean entryClockTimedOut;
+  boolean openDiscDrawn;
   CoverHandoff coverHandoff;
+  CoverOrigin coverOrigin;
+  final MutableState<Boolean> keepPrimaryCover=state(false);
   DiscSettings.ReelColor reelRasterChoice;
+  GeneratedCdRaster.Key cdRasterChoice;
+  boolean useCdRaster,cdRasterDrawn;
+  boolean tapeRasterDrawn;
+  DiscSettings.VinylColor vinylRasterChoice;
+  boolean useVinylRaster,vinylRasterDrawn;
   boolean useReelRaster, rasterDrawn;
   final MutableState<Object> passPainter=state(null);
   Object observedSource;
@@ -75,10 +108,16 @@ public final class CdPageProbePlugin extends SpwPlugin {
   String observedSong;
   DiscSettings.AlbumKey observedAlbum;
   ReflectionRenderer reflection;
+  final RootRenderer.CoverCorners coverCorners=new RootRenderer.CoverCorners();
   final FrontDiscLayer frontDiscLayer=new FrontDiscLayer();
   final DiscRotation rotation=new DiscRotation();
   final MutableState<Float> rotationAngle=state(0f);
   final MutableState<Boolean> retainingReturn=state(false);
+  final MutableState<Boolean> preparingNativeReturn=state(false);
+  final CoverHandoff.ReturnPosition returnPosition=new CoverHandoff.ReturnPosition();
+  final MutableState<CoverHandoff.ReturnAdjustment> returnAdjustment=state(CoverHandoff.ReturnAdjustment.ZERO);
+  Runnable nativeReturnAction;
+  long nativeReturnStarted;
   final RevealCycle revealCycle=new RevealCycle();
   final CoverSelection coverSelection=new CoverSelection();
   final TrackEntryGate trackGate=new TrackEntryGate();
@@ -88,38 +127,123 @@ public final class CdPageProbePlugin extends SpwPlugin {
   final MutableState<DiscTransition.Pose> pose=state(motion.pose());
   void freezeRotation(long now){rotationAngle.setValue(rotation.freeze(now));}
   void closeMotion(long now,Runnable done,boolean visibleDisc){
+   if(motion.closing()||motion.finished())return;
    freezeRotation(now);
    motion.setSpeed(displaySettings.getValue().motionSpeed());
-   motion.close(now,done,visibleDisc);pose.setValue(motion.pose());
+   boolean originReady=coverOrigin!=null&&coverHandoff!=null&&suppressionApplied
+       &&coverOrigin.viewport().equals(viewport.getValue());
+   clearEntryTiming();
+   motion.close(now,()->{
+    pose.setValue(motion.pose());
+    if(!preparingNativeReturn.getValue()){retainingReturn.setValue(false);done.run();}
+   },visibleDisc,originReady);
+   // Keep the Canvas visible while the native layout and its shadow settle.
+   if(originReady&&motion.closing()&&visualCover()!=null){
+    nativeReturnAction=done;
+    preparingNativeReturn.setValue(true);
+    retainingReturn.setValue(true);
+   }
+   pose.setValue(motion.pose());
   }
   void advanceMotion(long now){
    boolean redrawEntry=motion.pageEntryAnimating();
+   boolean redrawMotion=redrawEntry||motion.closing();
+   if(motion.phase()!=DiscTransition.Phase.OPEN)openDiscDrawn=false;
    boolean changed=motion.tick(now);
    // Widget width conservatively bounds both cover centering and disc travel,
    // including full exposure. Never advance navigation during the brake.
    changed=motion.finishSubpixelReturn(now,widgetWidth)||changed;
    if(changed){
     pose.setValue(motion.pose());
-    // Request a draw for page-entry motion even when Compose batches state notifications.
-    if(redrawEntry&&suppressionApplied&&CanvasWidget.requestDraw(widgetRoot)&&entryTiming!=null)
+    // Request a draw even when Compose batches state notifications.
+    if(redrawMotion&&suppressionApplied&&CanvasWidget.requestDraw(widgetRoot)&&redrawEntry&&entryTiming!=null)
      entryTiming.drawRequested();
    }
+   if(preparingNativeReturn.getValue()&&retainingReturn.getValue())observeNativeReturn(now);
+  }
+  boolean canUseEntryClock(){
+   return running&&!entryClockTimedOut&&motion.pageEntryAnimating()&&suppressionApplied&&ready.getValue()
+       &&widgetRoot!=null&&widgetRoot.isAttached();
+  }
+  void advanceFromTimer(long now){
+   if(entryClockOwner!=null&&motion.pageEntryAnimating()&&now-lastEntryFrame>=ENTRY_FRAME_TIMEOUT_NS){
+    entryClockTimedOut=true;entryClockOwner=null;
+    report("ENTRY_FRAME_CLOCK_FALLBACK timedOut=true");
+   }
+   boolean useEntryClock=canUseEntryClock();
+   entryFramesRequested.setValue(useEntryClock);
+   // Before Compose delivers its first frame, or on hosts without a frame clock,
+   // the timer keeps the original source-ready start and motion behavior.
+   if(!useEntryClock||entryClockOwner==null)advanceMotion(now);
+  }
+  Object driveEntryFrames(Continuation<? super Unit> completion){
+   Object owner=new Object();
+   return ComposeEntryFrames.run(completion,()->{
+    if(!javax.swing.SwingUtilities.isEventDispatchThread()||!canUseEntryClock())return false;
+    entryClockOwner=owner;
+    long now=System.nanoTime();
+    lastEntryFrame=now;
+    if(entryTiming!=null)entryTiming.hostFrame(now);
+    advanceMotion(now);
+    return canUseEntryClock();
+   },()->{if(entryClockOwner==owner)entryClockOwner=null;},
+       error->report("ENTRY_FRAME_CLOCK_FALLBACK "+error.getClass().getSimpleName()));
+  }
+  void observeNativeReturn(long now){
+   // Start the host transition as the exposed disc becomes a sliver.
+   // The host can then draw its shadow in the first native small-cover frame.
+   if(nativeReturnAction!=null&&motion.pose().exposed()<=.15f){
+    Runnable action=nativeReturnAction;
+    nativeReturnAction=null;
+    action.run();
+   }
+   Rect origin=coverOrigin!=null&&coverOrigin.viewport().equals(viewport.getValue())?coverOrigin.bounds():null;
+   Rect nativeBounds=nativeLyrics&&origin!=null?nativeCoverBounds(origin):null;
+   var priorAdjustment=returnAdjustment.getValue();
+   var adjustment=returnPosition.observe(origin,nativeBounds,now);
+   returnAdjustment.setValue(adjustment);
+   if(!motion.finished())return;
+   if(nativeReturnStarted==0)nativeReturnStarted=now;
+   // Give the corrected position a frame before releasing the overlay.
+   boolean aligned=returnPosition.aligned(priorAdjustment)&&returnPosition.aligned(adjustment);
+   long hold=now-nativeReturnStarted;
+   long limit=returnPosition.stable()?NATIVE_RETURN_ALIGNMENT_LIMIT_NS:NATIVE_RETURN_TIMEOUT_NS;
+   if(aligned||hold>=limit){
+    report("COVER_RETURN_HANDOFF aligned="+aligned+" holdMs="+hold/1_000_000L
+        +" dx="+adjustment.x()+" dy="+adjustment.y()+" sideDelta="+adjustment.sideDelta());
+    // Keep the final transform and reflection until the native composition
+    // actually replaces the Canvas.
+    if(nativeLyrics)retainingReturn.setValue(false);
+    else clearReturnHandoff();
+   }
+  }
+  void clearReturnHandoff(){
+   nativeReturnAction=null;nativeReturnStarted=0;
+   returnPosition.reset();returnAdjustment.setValue(CoverHandoff.ReturnAdjustment.ZERO);
+   preparingNativeReturn.setValue(false);retainingReturn.setValue(false);
   }
   String lastBoundsError="";
   DiscImage ownedCover,pendingCover;
   Object ownedSource,lastCaptureFailure;
   String handoffDiagnostic="";
+  void releaseCover(DiscImage cover){
+   if(cover==null)return;
+   var cache=generatedCdRaster;
+   if(cache!=null)cache.release(cover);
+   cover.close();
+  }
   void clearCover(){
    fallbackActive=false;
-   if(ownedCover!=null)ownedCover.close();ownedCover=null;
-   if(pendingCover!=null)pendingCover.close();pendingCover=null;
+   releaseCover(ownedCover);ownedCover=null;
+   releaseCover(pendingCover);pendingCover=null;
+   cdRasterChoice=null;
    ownedSource=null;lastCaptureFailure=null;
   }
   void awaitCover(){
    // Retain only the pixels already on screen, in the same Canvas geometry.
    // This is a visual placeholder, never proof of current-track readiness.
    if(ownedCover!=null){
-    if(pendingCover!=null)pendingCover.close();
+    releaseCover(pendingCover);
     pendingCover=ownedCover;ownedCover=null;
    }
    ownedSource=null;lastCaptureFailure=null;
@@ -140,26 +264,52 @@ public final class CdPageProbePlugin extends SpwPlugin {
    if(exposed!=0||amount<=0||motion.closing()||motion.finished())return;
    var status=artworkStatus.get();
    if(!status.resolved()||status.fileName()!=null)return;
+   var tape=reelTapeRaster;
+   if(style.reel()&&tape!=null)tape.prepare(DiscSettings.ReelColor.DEFAULT);
+   var vinyl=vinylSurfaceRaster;
+   if(style.vinyl()&&vinyl!=null)vinyl.prepare(vinylColor);
    if(style==DiscSettings.Style.REEL&&reelRasters!=null)reelRasters.prepare(reelColor);
    // A lookup can finish after the first cover draw. Every hidden pass
    // can prepare the current style and size; the renderer reuses hot caches.
    try{RootRenderer.prepareDefaultDisc(scope,amount,aspect,trimmed,style,vinylColor,reelColor,paths);}
    catch(Exception|LinkageError error){report("DISC_PREPARE_ERROR "+error.getClass().getSimpleName());}
   }
-  boolean drawPreparedReel(ReelEntryRaster cache,DiscSettings.ReelColor color,float angle,
+  boolean drawPreparedCd(GeneratedCdRaster cache,GeneratedCdRaster.Key key,
+      androidx.compose.ui.graphics.drawscope.DrawScope target,float cx,float cy,float diameter){
+   if(cache==null||key==null)return false;
+   if(!key.equals(cdRasterChoice)){
+    cdRasterChoice=key;
+    // Choose once before any movement. A raster that finishes late must not
+    // cause the renderer to switch mid-eject or on the first rotation frame.
+    useCdRaster=cache.ready(key);
+   }
+   if(!useCdRaster)return false;
+   useCdRaster=cache.draw(key,target,cx,cy,diameter);
+   cdRasterDrawn|=useCdRaster;
+   return useCdRaster;
+  }
+  boolean drawPreparedVinyl(DiscSurfaceRaster<DiscSettings.VinylColor> cache,DiscSettings.VinylColor color,
+      androidx.compose.ui.graphics.drawscope.DrawScope target,float radius){
+   if(cache==null)return false;
+   if(vinylRasterChoice!=color){
+    vinylRasterChoice=color;
+    // Use the same surface path when the label first starts to rotate.
+    useVinylRaster=cache.ready(color,radius*2);
+   }
+   if(!useVinylRaster)return false;
+   useVinylRaster=cache.draw(color,target,0,0,radius*2);
+   vinylRasterDrawn|=useVinylRaster;
+   return useVinylRaster;
+  }
+  boolean drawPreparedReel(DiscSurfaceRaster<DiscSettings.ReelColor> cache,DiscSettings.ReelColor color,float angle,
       androidx.compose.ui.graphics.drawscope.DrawScope target,float cx,float cy,float diameter){
    if(cache==null)return false;
-   if(angle!=0){
-    // The live renderer keeps the metal highlights stationary during rotation.
-    reelRasterChoice=color;useReelRaster=false;
-    return false;
-   }
    if(reelRasterChoice!=color){
     reelRasterChoice=color;
     useReelRaster=cache.ready(color,diameter);
    }
    if(!useReelRaster)return false;
-   useReelRaster=cache.draw(color,target,cx,cy,diameter);
+   useReelRaster=cache.draw(color,target,cx,cy,diameter,angle);
    rasterDrawn|=useReelRaster;
    return useReelRaster;
   }
@@ -188,8 +338,8 @@ public final class CdPageProbePlugin extends SpwPlugin {
     long started=System.nanoTime();
     DiscImage copy=HostCoverBridge.capture(live);
     DiscImage previous=ownedCover;ownedCover=copy;ownedSource=live;
-    if(previous!=null)previous.close();
-    if(pendingCover!=null)pendingCover.close();pendingCover=null;
+    releaseCover(previous);
+    releaseCover(pendingCover);pendingCover=null;
     report("COVER_OWNED source="+System.identityHashCode(live)+" elapsedUs="+elapsedMicros(started));
    }catch(Exception|LinkageError error){lastCaptureFailure=live;report("COVER_CAPTURE_ERROR "+error.getClass().getSimpleName());}
    // The host may dispose every outgoing image node when its own transition
@@ -217,30 +367,71 @@ public final class CdPageProbePlugin extends SpwPlugin {
    sourceRevision.getValue(); // Native subtree/cached image completion is not always a parent recomposition.
    return presentationVisible()&&Boolean.TRUE.equals(ready.getValue())&&!failed&&(fallbackActive||visualCover()!=null||HostCoverBridge.imageReady(source()))&&(pendingCover!=null||Boolean.TRUE.equals(trackPending.getValue())||discResolved());
   }
+  void clearEntryTiming(){
+   entryTiming=null;
+  }
   void restoreNative(){
+   entryFramesRequested.setValue(false);entryClockOwner=null;
+   entryClockTimedOut=openDiscDrawn=false;
    clearCover();lastPainted=null;rotation.reset();rotationAngle.setValue(0f);
-   entryTiming=null;coverHandoff=null;
-   secondary=false;ready.setValue(false);widgetRoot=null;revealCycle.reset();motion.reset();trackGate.reset();cueTrack.reset();trackPending.setValue(false);retainingReturn.setValue(false);pose.setValue(motion.pose());
+   clearReturnHandoff();
+   clearEntryTiming();coverHandoff=null;coverOrigin=null;keepPrimaryCover.setValue(false);
+   secondary=false;ready.setValue(false);widgetRoot=null;revealCycle.reset();motion.reset();trackGate.reset();cueTrack.reset();trackPending.setValue(false);pose.setValue(motion.pose());
    if(suppressionApplied)HostCoverBridge.invalidate(nativeRoot);
    passPainter.setValue(null);suppressionApplied=false;
   }
   void syncVisibility(boolean visible){
+   boolean wasVisible=revealCycle.visible();
    RevealCycle.Edge edge=revealCycle.sample(visible);
    if(edge==RevealCycle.Edge.NONE)return;
-   if(edge==RevealCycle.Edge.HIDDEN){freezeRotation(System.nanoTime());clearCover();}
+   entryFramesRequested.setValue(false);entryClockOwner=null;
+   entryClockTimedOut=openDiscDrawn=false;
+   if(edge==RevealCycle.Edge.HIDDEN){
+    freezeRotation(System.nanoTime());clearCover();
+    // Keep the click's origin while the host is still settling the initial page.
+    if(wasVisible){coverOrigin=null;keepPrimaryCover.setValue(false);}
+   }
    // No old pass, pending return or track request may leak into the next presentation.
-   motion.reset();trackGate.reset();cueTrack.reset();trackPending.setValue(false);retainingReturn.setValue(false);
+   motion.reset();trackGate.reset();cueTrack.reset();trackPending.setValue(false);clearReturnHandoff();
    passPainter.setValue(null);suppressionApplied=false;lastPainted=null;
-   entryTiming=null;coverHandoff=null;
+   clearEntryTiming();coverHandoff=null;
    if(edge==RevealCycle.Edge.SHOWN){
-    revealMeasured=slowEntryDrawLogged=false;motion.enter();
-    if(entriesTimed<2)entryTiming=new EntryTiming(System.nanoTime());
+    revealMeasured=slowEntryDrawLogged=spinMeasured=false;previousSpinDraw=0;motion.enter();
+    entryTiming=entryTimings.begin(System.nanoTime());
     report("PRESENTATION_READY restart cover-first entry");
    }
    pose.setValue(motion.pose());HostCoverBridge.invalidate(nativeRoot);
   }
   List<HostCoverBridge.Image> images(){
    var root=nativeRoot;return root!=null&&root.isAttached()?HostCoverBridge.images(root):List.of();
+  }
+  CoverOrigin captureCoverOrigin(){
+   String song;try{song=currentSong();}catch(RuntimeException unavailable){return null;}
+   if(song==null||song.isBlank())return null;
+   Viewport measured=viewport.getValue();
+   Rect cover=nativeCoverBounds(null);
+   return cover==null?null:new CoverOrigin(measured,cover);
+  }
+  Rect nativeCoverBounds(Rect returnOrigin){
+   var root=viewportRoot;
+   if(root==null||!root.isAttached())return null;
+   Viewport measured=viewport.getValue();
+   Rect cover=null;
+   long area=0;
+   for(var image:images()){
+    if(!HostCoverBridge.imageReady(image.painter())||!image.coordinates().isAttached())continue;
+    if(image.area()<area)break;
+    try{
+     Rect bounds=root.localBoundingBoxOf(image.coordinates(),false);
+     if(CoverHandoff.visibleOrigin(bounds,measured.width(),measured.height())
+         &&(returnOrigin==null||CoverHandoff.matchesReturnSlot(returnOrigin,bounds))
+         &&(cover==null||image.area()>area||bounds.getTop()<cover.getTop())){
+      // At equal sizes the lower node can be the cover reflection.
+      cover=bounds;area=image.area();
+     }
+    }catch(RuntimeException ignored){ /* The outgoing node may already be detached. */ }
+   }
+   return cover;
   }
   CoverHandoff measureCoverHandoff(Object painter,float side,float aspect){
    if(widgetRoot==null||!widgetRoot.isAttached())return CoverHandoff.FALLBACK;
@@ -302,7 +493,7 @@ public final class CdPageProbePlugin extends SpwPlugin {
     // the parent's next draw pass. Clearing this state causes a native-layout flash.
     passPainter.setValue(suppressionApplied&&presentationVisible()?pendingCover:null);lastPainted=null;
     if(previouslyObserved&&presentationVisible()&&motion.phase()!=DiscTransition.Phase.WAITING&&!motion.closing()&&!motion.finished()){
-     entryTiming=null;
+     clearEntryTiming();
      trackGate.request(song,System.nanoTime());
      motion.trackChanged();trackPending.setValue(true);pose.setValue(motion.pose());
     }
@@ -335,10 +526,8 @@ public final class CdPageProbePlugin extends SpwPlugin {
    coverAvailability.reset();
    coverStatus=new HostCoverStatus(coverAvailability,this::currentSong);
    handles.add(coverStatus.install());
-   discSettings=new DiscSettings(WorkshopApi.manager().createConfigManager(),value->{
-    if(localDiscs!=null)localDiscs.setNames(value.localNames());
-    displaySettings.setValue(value);report("DISC_SETTINGS amount="+value.amount()+" front="+value.front()+" rotate="+value.rotate()+" vinyl="+value.vinyl());
-   },this::artworkSource,()->currentAlbumKey(currentSong()));
+   discSettings=new DiscSettings(WorkshopApi.manager().createConfigManager(),this::applyDisplaySettings,
+       this::artworkSource,()->currentAlbumKey(currentSong()),this::prepareDefaultAppearance);
    handles.add(WorkshopApi.hookRegistrar().replaceComposable(host.cover.getDeclaringClass().getName(),host.cover.getName(),host.caller,
     List.of("kotlin.jvm.functions.Function0","boolean","boolean","boolean","androidx.compose.ui.Modifier"),50,new ComposableHook(){
      @Override public void Content(UiHookCall call,Composer composer,int changed){content(call,composer);}
@@ -356,14 +545,17 @@ public final class CdPageProbePlugin extends SpwPlugin {
    localDiscs=new LocalDiscService<>(this::currentSong,DiscImage::decode,()->discRevision.setValue(discRevision.getValue()+1),this::report);
    localDiscs.setNames(displaySettings.getValue().localNames());
    localDiscs.start();
-   renderWarmupPending=true;renderWarmupDone=false;entriesTimed=0;
-   reelRasters=new ReelEntryRaster(this::report);
+   renderWarmupPending=true;renderWarmupDone=false;entryTimings.restart();
+   generatedCdRaster=new GeneratedCdRaster(this::report);
+   reelRasters=DiscSurfaceRaster.reel(this::report);
+   reelTapeRaster=DiscSurfaceRaster.tape(this::report);
+   vinylSurfaceRaster=DiscSurfaceRaster.vinyl(this::report);
    enabled.setValue(true);running=true;
    // Swing Timer actions execute on Compose Desktop's UI event thread; native
    // layout nodes must not be traversed by the local-image decode worker.
    sourceObserver=new javax.swing.Timer(100,event->observeSources());sourceObserver.start();
    animationClock=new javax.swing.Timer(16,event->animateFrames());animationClock.setCoalesce(true);animationClock.start();
-   report("START 1.11.0 Host Binding; retained pixels are not readiness; entryStart=sourceReady; hooks="+handles.size());
+   report("START 1.12.0 Host Binding; retained pixels are not readiness; entryStart=sourceReady; coverCdRaster=true; vinylSurfaceRaster=true; layeredReel=true; hooks="+handles.size());
   }catch(Throwable e){stop();throw new IllegalStateException("SelfDraw startup failed",e);}
  }
  @SuppressWarnings("unchecked")
@@ -379,12 +571,17 @@ public final class CdPageProbePlugin extends SpwPlugin {
   final int amount=display.amount();final boolean front=display.front();
   var args=call.getArguments();frame.renderAllowed=(Boolean)args.get(3);
   boolean lyrics=(Boolean)args.get(1);
-  if(!lyrics&&!frame.secondary){frame.trackGate.reset();frame.motion.enter();frame.pose.setValue(frame.motion.pose());}
+  frame.nativeLyrics=lyrics;
+  if(!lyrics&&!frame.secondary){
+   if(frame.coverOrigin==null)frame.coverOrigin=frame.captureCoverOrigin();
+   frame.keepPrimaryCover.setValue(frame.coverOrigin!=null);
+   frame.trackGate.reset();frame.motion.enter();frame.pose.setValue(frame.motion.pose());
+  }
   // Native return paths may change the page before invoking our cover callback.
   // Retain the secondary visual until its disc is fully retracted.
   if(lyrics&&frame.secondary&&!frame.motion.finished()){
    frame.retainingReturn.setValue(true);
-   frame.closeMotion(System.nanoTime(),()->frame.retainingReturn.setValue(false),amount>0);
+   frame.closeMotion(System.nanoTime(),()->{},amount>0);
   }
   boolean visualLyrics=lyrics&&!frame.retainingReturn.getValue();
   if(visualLyrics)frame.restoreNative();
@@ -392,21 +589,34 @@ public final class CdPageProbePlugin extends SpwPlugin {
   Function0<Unit> nativeToggle=(Function0<Unit>)args.get(0);
   Function0<Unit> animatedToggle=()->{
    if(frame.secondary&&(frame.motion.closing()||frame.motion.finished()))return Unit.INSTANCE;
-   if(!frame.secondary||!frame.suppressionApplied){nativeToggle.invoke();return Unit.INSTANCE;}
+   if(!frame.secondary){
+    frame.coverOrigin=frame.captureCoverOrigin();
+    nativeToggle.invoke();return Unit.INSTANCE;
+   }
+   if(!frame.suppressionApplied){nativeToggle.invoke();return Unit.INSTANCE;}
    frame.closeMotion(System.nanoTime(),()->{
-    frame.pose.setValue(frame.motion.pose());nativeToggle.invoke();
+    if(!frame.nativeLyrics)nativeToggle.invoke();
    },amount>0);
    return Unit.INSTANCE;
   };
   boolean active=frame.presentationVisible();
   frame.syncVisibility(active);
   Viewport viewport=frame.viewport.getValue();
+  if(frame.coverOrigin!=null&&!frame.coverOrigin.viewport().equals(viewport)){
+   frame.coverOrigin=null;frame.keepPrimaryCover.setValue(false);
+  }
   SelfDrawLayout plan=SelfDrawLayout.fit(viewport.width(),viewport.height(),density.getDensity(),!visualLyrics,visualLyrics?DiscExposure.DEFAULT:amount);
   frame.widgetWidth=plan.width();frame.widgetHeight=plan.height();
   if(!active||!plan.usable(density.getDensity()))frame.ready.setValue(false);
   Modifier box=SizeKt.fillMaxSize((Modifier)args.get(4),1f);
   box=OnGloballyPositionedModifierKt.onGloballyPositioned(box,c->{
-   try{long size=size(c);frame.viewport.setValue(new Viewport((int)(size>>>32),(int)size));}catch(Exception e){report("VIEWPORT_ERROR "+e.getClass().getSimpleName());}
+   frame.viewportRoot=c;
+   try{
+    long size=size(c);
+    var viewportSize=new Viewport((int)(size>>>32),(int)size);
+    frame.viewport.setValue(viewportSize);
+    warmupViewport=new WarmupViewport(viewportSize,density.getDensity());
+   }catch(Exception e){report("VIEWPORT_ERROR "+e.getClass().getSimpleName());}
    return Unit.INSTANCE;
   });
   box=DrawModifierKt.drawWithContent(box,scope->{
@@ -417,6 +627,7 @@ public final class CdPageProbePlugin extends SpwPlugin {
    Object selected=frame.paintSource();
    frame.passPainter.setValue(frame.suppress()?selected:null);
    boolean suppression=frame.passPainter.getValue()!=null;
+   if(suppression&&frame.keepPrimaryCover.getValue())frame.keepPrimaryCover.setValue(false);
    String diagnostic="secondary="+frame.secondary+" allowed="+frame.renderAllowed+" ready="+frame.ready.getValue()+" failed="+frame.failed+" owned="+(frame.ownedCover!=null)+" placeholder="+(frame.pendingCover!=null)+" selected="+(selected!=null)+" phase="+frame.motion.phase()+" custom="+suppression;
    if(!diagnostic.equals(frame.handoffDiagnostic)){frame.handoffDiagnostic=diagnostic;report("DRAW_HANDOFF "+diagnostic);}
    if(suppression!=frame.suppressionApplied){frame.suppressionApplied=suppression;HostCoverBridge.invalidate(frame.nativeRoot);}
@@ -433,12 +644,22 @@ public final class CdPageProbePlugin extends SpwPlugin {
    nativeModifier=DrawModifierKt.drawWithContent(nativeModifier,nativeScope->{
     if(frame.passPainter.getValue()==null)nativeScope.drawContent();return Unit.INSTANCE;
    });
-   drawOriginal(args,nativeModifier,c,animatedToggle,visualLyrics);
+   boolean primaryCover=visualLyrics||frame.keepPrimaryCover.getValue()||frame.preparingNativeReturn.getValue();
+   drawOriginal(args,nativeModifier,c,animatedToggle,primaryCover);
    c.endReplaceGroup();
    c.startReplaceGroup(0x43444f57);
    if(show){
     try{
-     Modifier widget=CanvasWidget.modifier(plan,density.getDensity(),animatedToggle);
+     var origin=frame.coverOrigin;
+     var translation=origin==null?null:CoverHandoff.translationFrom(origin.bounds(),plan);
+     Modifier widget=CanvasWidget.modifier(plan,density.getDensity(),animatedToggle,layer->{
+      // Move the whole layer so the incoming cover and reflection stay within its recording bounds.
+      float remaining=CoverHandoff.remaining(frame.pose.getValue().scale());
+      var alignment=frame.returnAdjustment.getValue();
+      layer.setTranslationX(translation==null?0f:(translation.x()+alignment.x())*remaining);
+      layer.setTranslationY(translation==null?0f:(translation.y()+alignment.y())*remaining);
+      return Unit.INSTANCE;
+     });
      widget=OnGloballyPositionedModifierKt.onGloballyPositioned(widget,coords->{
       frame.widgetRoot=coords;
       if(!frame.failed)try{
@@ -467,7 +688,9 @@ public final class CdPageProbePlugin extends SpwPlugin {
       var phase=frame.motion.phase();
       boolean measureEntry=!frame.slowEntryDrawLogged
           &&(phase==DiscTransition.Phase.COVER||phase==DiscTransition.Phase.OPENING);
-      long started=firstPaint||firstReveal||measureEntry||timing!=null?System.nanoTime():0;
+      boolean measureSpin=display.rotate()&&amount>0&&!frame.spinMeasured
+          &&(phase==DiscTransition.Phase.OPENING||phase==DiscTransition.Phase.OPEN);
+      long started=firstPaint||firstReveal||measureEntry||measureSpin||timing!=null?System.nanoTime():0;
       long reflectionNanos=0;
       try{
        discRevision.getValue(); // Observe async image publication, including same-song file replacement.
@@ -478,34 +701,64 @@ public final class CdPageProbePlugin extends SpwPlugin {
        var selectedReelColor=appearance.reelColor();
        var reelColor=appearance.style()==DiscSettings.Style.REEL&&selectedReelColor==DiscSettings.ReelColor.RANDOM
          ?reelRandom.resolve(album!=null?album:DiscSettings.AlbumKey.of(null,null,null,0,drawSong)):selectedReelColor;
+       DiscImage cover=selected.cover();
+       var bounds=cover==null||display.trimCover()==CoverWhiteBorders.Mode.OFF?null:cover.coverBounds(display.trimCover());
+       boolean trim=bounds!=null;
+       float aspect=cover==null?1f:trim?bounds.displayAspect():cover.aspect();
+       var cdCache=generatedCdRaster;
+       var cdKey=appearance.style()==DiscSettings.Style.CD&&cover==frame.ownedCover
+           ?GeneratedCdRaster.Key.of(cover,bounds,aspect,RootRenderer.discRadius(plan.side(),aspect,trim)*2):null;
+       frame.cdRasterDrawn=false;
+       if(selected.exposed()==0||cdKey==null)frame.cdRasterChoice=null;
        var reelCache=reelRasters;
+       var tapeCache=reelTapeRaster;
+       var vinylCache=vinylSurfaceRaster;
        frame.rasterDrawn=false;
+       frame.tapeRasterDrawn=false;
+       frame.vinylRasterDrawn=false;
+       if(selected.exposed()==0||!appearance.style().vinyl())frame.vinylRasterChoice=null;
        if(selected.exposed()==0||appearance.style()!=DiscSettings.Style.REEL)frame.reelRasterChoice=null;
-       RootRenderer.Disc disc=(target,cx,cy,diameter)->{
-        // Resolve custom artwork before offering any generated reel.
-        try{if(service==null||service.drawResolved(drawSong,image->image.draw(target,cx,cy,diameter)))return true;}
-        catch(Exception error){report("LOCAL_CD_DRAW_ERROR "+error.getClass().getSimpleName());return true;}
-        return appearance.style()==DiscSettings.Style.REEL
-            &&frame.drawPreparedReel(reelCache,reelColor,angle,target,cx,cy,diameter);
+       RootRenderer.Disc disc=new RootRenderer.Disc(){
+        @Override public boolean draw(androidx.compose.ui.graphics.drawscope.DrawScope target,float cx,float cy,float diameter){
+         // Resolve custom artwork before offering any generated disc.
+         try{if(service==null||service.drawResolved(drawSong,image->image.draw(target,cx,cy,diameter)))return true;}
+         catch(Exception error){report("LOCAL_CD_DRAW_ERROR "+error.getClass().getSimpleName());return true;}
+         if(cdKey!=null)return frame.drawPreparedCd(cdCache,cdKey,target,cx,cy,diameter);
+         return appearance.style()==DiscSettings.Style.REEL
+             &&frame.drawPreparedReel(reelCache,reelColor,angle,target,cx,cy,diameter);
+        }
+        @Override public boolean drawVinylSurface(androidx.compose.ui.graphics.drawscope.DrawScope target,float radius){
+         return frame.drawPreparedVinyl(vinylCache,vinylColor,target,radius);
+        }
+        @Override public boolean drawReelTape(androidx.compose.ui.graphics.drawscope.DrawScope target,float radius){
+         boolean drawn=tapeCache!=null&&tapeCache.draw(DiscSettings.ReelColor.DEFAULT,target,0,0,radius*2);
+         frame.tapeRasterDrawn|=drawn;
+         return drawn;
+        }
        };
        var canvas=scope.getDrawContext().getCanvas();canvas.save();
        try{
         float travel=DiscExposure.fraction(amount)*.5f;
         float offset=plan.side()*travel*motion.centered();
         float pivot=plan.side()*(.5f+travel-travel*motion.centered());
-        DiscImage cover=selected.cover();
-        var bounds=cover==null||display.trimCover()==CoverWhiteBorders.Mode.OFF?null:cover.coverBounds(display.trimCover());
-        boolean trim=bounds!=null;
-        float aspect=cover==null?1f:trim?bounds.displayAspect():cover.aspect();
         var handoff=frame.coverHandoff;
         if(handoff==null&&(phase==DiscTransition.Phase.WAITING||phase==DiscTransition.Phase.COVER)){
-         // Freeze the starting size on the first overlay frame. The native
-         // painter may still belong to the outgoing lyrics layout.
-         // Later painter replacements must not restart the scale animation.
-         handoff=frame.measureCoverHandoff(painter,plan.side(),aspect);
+         // Use the same outgoing bounds for scaling and translation.
+         if(origin==null)handoff=frame.measureCoverHandoff(painter,plan.side(),aspect);
+         else{
+          handoff=CoverHandoff.from(origin.bounds(),plan.side(),aspect);
+          report("COVER_HANDOFF moving=true dx="+translation.x()+" dy="+translation.y()+" startScale="+handoff.scale());
+         }
          frame.coverHandoff=handoff;
         }
-        float scale=handoff==null?motion.scale():handoff.animatedScale(CoverHandoff.remaining(motion.scale()));
+        float shrink=CoverHandoff.remaining(motion.scale());
+        boolean returningCover=shrink>0&&cover!=null&&origin!=null&&frame.preparingNativeReturn.getValue();
+        // The native slot survives a song change. Fit the current artwork to
+        // that slot even if its aspect ratio or the Canvas size changed.
+        var alignment=frame.returnAdjustment.getValue();
+        if(returningCover)handoff=CoverHandoff.fromSlot(origin.bounds(),plan.side(),alignment.sideDelta());
+        float scale=handoff==null?motion.scale():handoff.animatedScale(shrink);
+        float coverRadius=CoverHandoff.coverCornerRadius(scale,density.getDensity());
         canvas.translate(offset+pivot,plan.side()*.5f);
         canvas.scale(scale,scale);
         canvas.translate(-pivot,-plan.side()*.5f);
@@ -516,13 +769,26 @@ public final class CdPageProbePlugin extends SpwPlugin {
         };
         float exposed=selected.exposed();
         if(service!=null&&drawSong!=null&&Objects.equals(drawSong,playbackSong)){
-         frame.prepareHiddenDisc(scope,exposed,amount,aspect,trim,appearance.style(),vinylColor,reelColor,
-             androidx.compose.ui.graphics.SkiaBackedPath_skikoKt::Path,()->service.artworkStatus(drawSong));
+         if(exposed==0&&amount>0&&!frame.motion.closing()&&!frame.motion.finished()){
+          var status=service.artworkStatus(drawSong);
+          if(cdCache!=null&&cdKey!=null&&status.resolved()&&status.fileName()==null)cdCache.prepare(cdKey);
+          frame.prepareHiddenDisc(scope,exposed,amount,aspect,trim,appearance.style(),vinylColor,reelColor,
+              androidx.compose.ui.graphics.SkiaBackedPath_skikoKt::Path,()->status);
+         }
         }
-        if(cover!=null)RootRenderer.paint(scope,aspect,source,disc,androidx.compose.ui.graphics.SkiaBackedPath_skikoKt::Path,exposed,amount,front,frame.frontDiscLayer,angle,appearance.style(),vinylColor,trim,reelColor);
-        else RootRenderer.draw(scope,painter,()->rawSource.set(true),()->rawSource.remove(),disc,exposed,amount,front,frame.frontDiscLayer,angle,frame.fallbackActive,appearance.style(),vinylColor,reelColor);
-        float gap=4*density.getDensity(),reflectedHeight=plan.height()-plan.side()-gap;
-        if(reflectedHeight>0){
+        if(cover!=null)RootRenderer.paint(scope,aspect,source,disc,androidx.compose.ui.graphics.SkiaBackedPath_skikoKt::Path,exposed,amount,front,frame.frontDiscLayer,angle,appearance.style(),vinylColor,trim,reelColor,frame.coverCorners,coverRadius);
+        else RootRenderer.draw(scope,painter,()->rawSource.set(true),()->rawSource.remove(),disc,exposed,amount,front,frame.frontDiscLayer,angle,frame.fallbackActive,appearance.style(),vinylColor,reelColor,frame.coverCorners,coverRadius);
+        float gap=4*density.getDensity();
+        float reflectedHeight=Math.max(0,plan.height()-plan.side()-gap);
+        if(reflectedHeight>0||returningCover){
+         var band=ReflectionRenderer.returning(plan.side(),RootRenderer.fittedHeight(plan.side(),aspect),
+             reflectedHeight,gap,returningCover?shrink:0);
+         // The recording layer allows out-of-bounds paint like the native cover.
+         // Limit the longer return reflection in viewport coordinates without relayout.
+         float translatedY=returningCover?(translation.y()+alignment.y())*shrink:0f;
+         float clipBottom=returningCover
+             ?plan.side()*.5f+(viewport.height()-Math.round(plan.top())-translatedY-plan.side()*.5f)/scale
+             :plan.height();
          if(frame.reflection==null)frame.reflection=new ReflectionRenderer();
          long reflectionStarted=started==0?0:System.nanoTime();
          try{
@@ -530,24 +796,36 @@ public final class CdPageProbePlugin extends SpwPlugin {
           if(!front&&!trim&&exposed>0&&service!=null){
            var artwork=service.artworkStatus(drawSong);
            if(artwork.resolved()&&artwork.fileName()==null){
-            mirrorExposure=RootRenderer.reflectedExposure(scope,exposed,amount,plan.side()-reflectedHeight);
+            mirrorExposure=RootRenderer.reflectedExposure(scope,exposed,amount,band.sourceTop());
            }
           }
           float reflected=mirrorExposure;
-          frame.reflection.draw(scope,plan.side(),plan.width(),reflectedHeight,gap,()->{
-           if(cover!=null)RootRenderer.paint(scope,aspect,source,disc,androidx.compose.ui.graphics.SkiaBackedPath_skikoKt::Path,reflected,amount,front,frame.frontDiscLayer,angle,appearance.style(),vinylColor,trim,reelColor);
-           else RootRenderer.draw(scope,painter,()->rawSource.set(true),()->rawSource.remove(),disc,reflected,amount,front,frame.frontDiscLayer,angle,frame.fallbackActive,appearance.style(),vinylColor,reelColor);
+          if(timing!=null&&reflected>0)timing.discReflection(started);
+          frame.reflection.draw(scope,reflected==0?plan.side():plan.width(),band,clipBottom,()->{
+           if(cover!=null)RootRenderer.paint(scope,aspect,source,disc,androidx.compose.ui.graphics.SkiaBackedPath_skikoKt::Path,reflected,amount,front,frame.frontDiscLayer,angle,appearance.style(),vinylColor,trim,reelColor,frame.coverCorners,coverRadius);
+           else RootRenderer.draw(scope,painter,()->rawSource.set(true),()->rawSource.remove(),disc,reflected,amount,front,frame.frontDiscLayer,angle,frame.fallbackActive,appearance.style(),vinylColor,reelColor,frame.coverCorners,coverRadius);
           });
          }catch(Exception error){report("REFLECTION_ERROR "+error.getClass().getSimpleName());}
          finally{if(reflectionStarted!=0)reflectionNanos=System.nanoTime()-reflectionStarted;}
         }
        }finally{canvas.restore();}
+       if(phase==DiscTransition.Phase.OPEN&&selected.exposed()==1f&&amount>0)frame.openDiscDrawn=true;
        if(timing!=null){
         timing.paint(phase,started,System.nanoTime()-started,reflectionNanos);
         if(phase==DiscTransition.Phase.OPEN){
-         frame.entryTiming=null;
-         if(entriesTimed<2)report(timing.summary(++entriesTimed));
+         frame.clearEntryTiming();
+         String summary=entryTimings.complete(timing);
+         if(summary!=null)report(summary);
         }
+       }
+       if(measureSpin){
+        if(phase==DiscTransition.Phase.OPEN&&angle!=0&&selected.exposed()>0){
+         frame.spinMeasured=true;
+         long gap=frame.previousSpinDraw==0?0:(started-frame.previousSpinDraw)/1_000;
+         report("ROTATION_FIRST_DRAW style="+appearance.style()+" gapUs="+gap+" elapsedUs="+elapsedMicros(started)
+             +" reflectionUs="+reflectionNanos/1_000+" reelRaster="+frame.rasterDrawn+" tapeRaster="+frame.tapeRasterDrawn+" cdRaster="+frame.cdRasterDrawn+" vinylRaster="+frame.vinylRasterDrawn);
+        }
+        frame.previousSpinDraw=started;
        }
        if(firstPaint){
         frame.lastPainted=painter;
@@ -569,11 +847,15 @@ public final class CdPageProbePlugin extends SpwPlugin {
         var artwork=service==null?null:service.artworkStatus(drawSong);
         String artworkKind=artwork==null||!artwork.resolved()?"unresolved":artwork.fileName()==null?"generated":"local";
         report("FIRST_REVEAL_DRAW elapsedUs="+drawMicros+" reflectionUs="+reflectionNanos/1_000
-            +" style="+appearance.style()+" artwork="+artworkKind+" reelRaster="+frame.rasterDrawn);
+            +" style="+appearance.style()+" artwork="+artworkKind+" reelRaster="+frame.rasterDrawn+" tapeRaster="+frame.tapeRasterDrawn+" cdRaster="+frame.cdRasterDrawn+" vinylRaster="+frame.vinylRasterDrawn);
        }
-      }catch(Throwable error){frame.clearCover();frame.passPainter.setValue(null);frame.rejectedSource.setValue(painter);HostCoverBridge.invalidate(frame.nativeRoot);report("SELF_DRAW_SOURCE_ERROR native fallback until a fresh source: "+error.getClass().getSimpleName());}
+      }catch(Throwable error){frame.clearEntryTiming();frame.clearCover();frame.passPainter.setValue(null);frame.rejectedSource.setValue(painter);HostCoverBridge.invalidate(frame.nativeRoot);report("SELF_DRAW_SOURCE_ERROR native fallback until a fresh source: "+error.getClass().getSimpleName());}
       return Unit.INSTANCE;
      },c,0);
+     c.startReplaceGroup(0x43444546);
+     if(frame.entryFramesRequested.getValue())
+      EffectsKt.LaunchedEffect(frame,(scope,completion)->frame.driveEntryFrames(completion),c,0);
+     c.endReplaceGroup();
     }catch(Exception error){frame.failed=true;frame.ready.setValue(false);report("WIDGET_ERROR "+error.getClass().getSimpleName());}
    }
    c.endReplaceGroup();return Unit.INSTANCE;
@@ -612,6 +894,55 @@ public final class CdPageProbePlugin extends SpwPlugin {
  }
  private boolean discResolved(){try{return localDiscs!=null&&discResolved(currentSong());}catch(Exception unavailable){return false;}}
  private boolean discResolved(String song){return localDiscs!=null&&localDiscs.isResolved(song);}
+ private void prepareDefaultAppearance(DiscSettings.Appearance appearance){
+  // The settings dialog already saves on a worker. Finish preparation before
+  // publishing the new style so an immediate open can use its warmed shaders.
+  var lifecycle=reelRasters;
+  if(!running||lifecycle==null)return;
+  if(displaySettings.getValue().amount()>0&&appearance.style()==DiscSettings.Style.REEL
+      &&appearance.reelColor()!=DiscSettings.ReelColor.RANDOM)lifecycle.prepare(appearance.reelColor());
+  var viewport=warmupViewport;
+  var target=viewport==null?RenderWarmup.Target.SAMPLE:viewport.target(displaySettings.getValue().amount());
+  long started=System.nanoTime();
+  try{
+   var finishes=RenderWarmup.run(appearance,target);
+   if(running&&lifecycle==reelRasters)preparedAppearance=new PreparedAppearance(appearance,finishes);
+   report("SETTINGS_RENDER_WARMUP style="+appearance.style()+" width="+target.width()+" height="+target.height()
+       +" elapsedUs="+elapsedMicros(started));
+  }catch(Exception|LinkageError unavailable){
+   report("SETTINGS_RENDER_WARMUP_SKIPPED style="+appearance.style()+" "+unavailable.getClass().getSimpleName());
+  }
+ }
+ private void applyDisplaySettings(DiscSettings.Values value){
+  var previous=displaySettings.getValue();
+  if(value.rotate()&&!previous.rotate()){
+   long started=System.nanoTime();
+   if(playbackState.prepare(this::report))report("ROTATION_BINDING elapsedUs="+elapsedMicros(started));
+  }
+  if(!previous.appearance().equals(value.appearance())){
+   var prepared=preparedAppearance;
+   boolean warmed=prepared!=null&&prepared.appearance().equals(value.appearance());
+   if(warmed){
+    preparedAppearance=null;
+    RootRenderer.adoptPrepared(prepared.finishes());
+   }
+   int series=entryTimings.restart();
+   report("DEFAULT_APPEARANCE_CHANGED series="+series+" from="+previous.appearance().style()+" to="+value.appearance().style()
+       +" warmed="+warmed+" rotate="+value.rotate());
+   var raster=reelRasters;
+   var tape=reelTapeRaster;
+   var appearance=value.appearance();
+   if(tape!=null&&value.amount()>0&&appearance.style().reel())tape.prepare(DiscSettings.ReelColor.DEFAULT);
+   var vinyl=vinylSurfaceRaster;
+   if(vinyl!=null&&value.amount()>0&&appearance.style().vinyl()&&appearance.finish()!=DiscSettings.VinylColor.RANDOM)
+    vinyl.prepare(appearance.finish());
+   if(raster!=null&&value.amount()>0&&appearance.style()==DiscSettings.Style.REEL
+       &&appearance.reelColor()!=DiscSettings.ReelColor.RANDOM)raster.prepare(appearance.reelColor());
+  }
+  if(localDiscs!=null)localDiscs.setNames(value.localNames());
+  displaySettings.setValue(value);
+  report("DISC_SETTINGS amount="+value.amount()+" front="+value.front()+" rotate="+value.rotate()+" vinyl="+value.vinyl());
+ }
  private void observeSources(){
   if(!running)return;
   try{
@@ -628,11 +959,20 @@ public final class CdPageProbePlugin extends SpwPlugin {
     }
    }}
    if(renderWarmupPending&&!entryVisible)warmRenderPath();
-   if(!entryVisible&&reelRasters!=null){
+   if(!entryVisible){
+    var wholeReel=reelRasters;
+    var tape=reelTapeRaster;
     var settings=displaySettings.getValue();
-    var appearance=settings.albumStyles().isEmpty()?settings.appearance():settings.appearanceFor(currentAlbumKey(song));
-    if(settings.amount()>0&&appearance.style()==DiscSettings.Style.REEL&&appearance.reelColor()!=DiscSettings.ReelColor.RANDOM)
-     reelRasters.prepare(appearance.reelColor());
+    var album=settings.albumStyles().isEmpty()?null:currentAlbumKey(song);
+    var appearance=settings.appearanceFor(album);
+    var vinyl=vinylSurfaceRaster;
+    if(vinyl!=null&&settings.amount()>0&&appearance.style().vinyl()){
+     if(album==null&&appearance.finish()==DiscSettings.VinylColor.RANDOM)album=currentAlbumKey(song);
+     vinyl.prepare(resolveVinylColor(appearance.finish(),album,song));
+    }
+    if(tape!=null&&settings.amount()>0&&appearance.style().reel())tape.prepare(DiscSettings.ReelColor.DEFAULT);
+    if(wholeReel!=null&&settings.amount()>0&&appearance.style()==DiscSettings.Style.REEL
+        &&appearance.reelColor()!=DiscSettings.ReelColor.RANDOM)wholeReel.prepare(appearance.reelColor());
    }
    if(changed){sourceRevision.setValue(sourceRevision.getValue()+1);report("SOURCE_REFRESH");}
   }catch(Exception error){report("SOURCE_OBSERVER_ERROR "+error.getClass().getSimpleName());}
@@ -668,7 +1008,10 @@ public final class CdPageProbePlugin extends SpwPlugin {
    frame.syncVisibility(visible);
    if(!visible){frame.rotationAngle.setValue(frame.rotation.sample(song,rotate,false,false,now));continue;}
    frame.refreshReady();
-   if(frame.nativeRoot==null||!frame.nativeRoot.isAttached()){frame.rotationAngle.setValue(frame.rotation.sample(song,rotate,false,false,now));continue;}
+   if(frame.nativeRoot==null||!frame.nativeRoot.isAttached()){
+    if(frame.motion.closing()||frame.preparingNativeReturn.getValue())frame.advanceMotion(now);
+    frame.rotationAngle.setValue(frame.rotation.sample(song,rotate,false,false,now));continue;
+   }
    try{
     if(frame.entryTiming!=null)frame.entryTiming.clock(now);
     frame.motion.setSpeed(display.motionSpeed());
@@ -681,7 +1024,8 @@ public final class CdPageProbePlugin extends SpwPlugin {
       frame.trackGate.request(song,now);
       frame.rotation.reset();frame.rotationAngle.setValue(0f);
      }
-     frame.entryTiming=null;
+     frame.clearEntryTiming();
+     frame.spinMeasured=false;frame.previousSpinDraw=0;
      frame.motion.trackChanged();frame.trackPending.setValue(true);frame.pose.setValue(frame.motion.pose());
      report(cueChanged?"TRACK_ENTRY_PENDING cue=true":"TRACK_ENTRY_PENDING");
     }
@@ -694,12 +1038,12 @@ public final class CdPageProbePlugin extends SpwPlugin {
      // Start at source and layout readiness, as in v1.9.0.
      frame.motion.ready(now);
     }
-    frame.advanceMotion(now);
-    boolean canRotate=rotate&&song!=null&&frame.motion.phase()==DiscTransition.Phase.OPEN
+    frame.advanceFromTimer(now);
+    boolean canRotate=rotate&&song!=null&&frame.motion.phase()==DiscTransition.Phase.OPEN&&frame.openDiscDrawn
       &&(frame.fallbackActive||frame.ownedCover!=null)&&display.amount()>0&&discResolved(song);
     if(canRotate&&playing==null)playing=playbackState.playing(this::report);
     frame.rotationAngle.setValue(frame.rotation.sample(song,rotate,canRotate&&playing,canRotate,now,display.rotationSpeed().rotationPeriod));
-   }catch(Exception error){frame.rotation.sample(song,rotate,false,false,now);frame.motion.reset();frame.pose.setValue(frame.motion.pose());report("ANIMATION_ERROR "+error.getClass().getSimpleName());}
+   }catch(Exception error){frame.rotation.sample(song,rotate,false,false,now);frame.motion.reset();frame.clearReturnHandoff();frame.pose.setValue(frame.motion.pose());report("ANIMATION_ERROR "+error.getClass().getSimpleName());}
   }}
   // The faster animation clock may see a new source before sourceObserver.
   // Publish that observation too, so a suppressed cached native layer cannot
@@ -727,11 +1071,15 @@ public final class CdPageProbePlugin extends SpwPlugin {
  }
  @Override public synchronized void stop(){
   enabled.setValue(false);running=false;coverAvailability.reset();coverStatus=null;
+  warmupViewport=null;preparedAppearance=null;
   if(animationClock!=null){animationClock.stop();animationClock=null;}
   if(discSettings!=null){try{discSettings.close();}catch(Exception error){report("SETTINGS_CLOSE_WARNING "+error.getClass().getSimpleName());}discSettings=null;}
   synchronized(frames){for(var ref:frames){Frame frame=ref.get();if(frame!=null)frame.restoreNative();}}
   if(sourceObserver!=null){sourceObserver.stop();sourceObserver=null;}
+  if(generatedCdRaster!=null){generatedCdRaster.close();generatedCdRaster=null;}
   if(reelRasters!=null){reelRasters.close();reelRasters=null;}
+  if(reelTapeRaster!=null){reelTapeRaster.close();reelTapeRaster=null;}
+  if(vinylSurfaceRaster!=null){vinylSurfaceRaster.close();vinylSurfaceRaster=null;}
   if(localDiscs!=null){localDiscs.close();localDiscs=null;}
   for(int i=handles.size()-1;i>=0;i--)try{handles.get(i).close();}catch(Throwable e){report("UNHOOK_WARNING "+e.getClass().getSimpleName());}
   handles.clear();rawSource.remove();report("STOP SelfDraw disabled; native fallback");

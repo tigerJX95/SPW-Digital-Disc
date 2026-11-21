@@ -7,8 +7,22 @@ final class CoverHandoffTest {
   var nativeBounds=new Rect(35,111,498,574);
   float side=678;
   var handoff=CoverHandoff.from(nativeBounds,side,1);
-  var centered=CoverHandoff.from(new Rect(107,107,570,570),side,1);
-  if(!handoff.equals(centered))throw new AssertionError("outgoing lyrics position must not pull the cover off center");
+  if(!CoverHandoff.visibleOrigin(nativeBounds,1080,720)
+      ||CoverHandoff.visibleOrigin(new Rect(-190,100,200,490),1080,720)
+      ||CoverHandoff.visibleOrigin(new Rect(100,100,100,100),1080,720))
+   throw new AssertionError("only measurable covers inside the viewport can anchor the transition");
+  for(int amount:new int[]{0,25,50,100}){
+   var plan=SelfDrawLayout.fit(1080,720,1,true,amount);
+   var origin=CoverHandoff.translationFrom(nativeBounds,plan);
+   float x=Math.round(plan.left())+plan.width()*.5f;
+   float y=Math.round(plan.top())+plan.side()*.5f;
+   near(x+origin.x(),266.5f,"first frame starts at the original horizontal center");
+   near(y+origin.y(),342.5f,"first frame starts at the original vertical center");
+   float pivot=plan.side()*(.5f+DiscExposure.fraction(amount)*.5f);
+   near(Math.round(plan.left())+pivot,x,"slide ends at the cover's centered rendering pivot");
+   near(x+origin.x()*.5f,(x+266.5f)*.5f,"halfway horizontal slide");
+   near(y+origin.y()*.5f,(y+342.5f)*.5f,"halfway vertical slide");
+  }
   var motion=new DiscTransition();
   motion.enter();
   float beginning=CoverHandoff.remaining(motion.pose().scale());
@@ -21,6 +35,7 @@ final class CoverHandoffTest {
   motion.tick(now+120_000_000L);
   float midway=CoverHandoff.remaining(motion.pose().scale());
   near(handoff.animatedScale(midway)*side,(side+463)*.5f,"halfway size");
+  near(midway,.5f,"position uses the same timing as size");
   near(motion.pose().exposed(),0,"disc hidden during enlargement");
   motion.tick(now+240_000_000L);
   near(CoverHandoff.remaining(motion.pose().scale()),0,"no native geometry after enlargement");
@@ -33,11 +48,19 @@ final class CoverHandoffTest {
   motion.trackReady(now+1_000_000_000L);
   if(motion.pageEntryAnimating())throw new AssertionError("track entry retains its normal redraw route");
 
+  motion.enter();
+  motion.ready(now);
+  motion.tick(now+120_000_000L);
+  motion.close(now+120_000_000L,()->{});
+  near(CoverHandoff.remaining(motion.pose().scale()),.5f,"interrupted return starts at the current position");
+  motion.tick(now+300_000_000L);
+  near(CoverHandoff.remaining(motion.pose().scale()),1,"interrupted return reaches the native origin");
+
   var portrait=CoverHandoff.from(new Rect(100,100,300,500),side,.5f);
   near(portrait.scale()*side,400,"fitted portrait size");
   if(CoverHandoff.from(new Rect(1,1,1,1),side,1)!=CoverHandoff.FALLBACK)
    throw new AssertionError("unmeasured native geometry should retain the existing fallback");
-  System.out.println("PASS: centered size handoff and page-entry redraw scope, independent of the track-entry route");
+  System.out.println("PASS: native-position and size handoff, uninterrupted eject timing, early return and independent track entry");
  }
 
  private static void near(float actual,float expected,String label){

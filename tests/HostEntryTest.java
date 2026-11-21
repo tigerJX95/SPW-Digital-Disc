@@ -59,8 +59,11 @@ public class HostEntryTest {
   if(!permissions.equals(Set.of("class-transform","library-read")))throw new AssertionError("manifest permissions parsing");
   System.out.println("PASS actual host parses both declared manifest permissions");
   Modifier widget=CanvasWidget.modifier(SelfDrawLayout.fit(1673,930,1,false),1,()->Unit.INSTANCE);
-  if(!widget.any(element->element.getClass().getName().equals("androidx.compose.ui.graphics.BlockGraphicsLayerElement")))
-   throw new AssertionError("Disc Canvas must have its own recording layer");
+  var order=widget.foldIn(new ArrayList<String>(),(names,element)->{
+   names.add(element.getClass().getSimpleName());return names;
+  });
+  int layer=order.indexOf("BlockGraphicsLayerElement"),click=order.indexOf("ClickableElement");
+  if(layer<0||click<=layer)throw new AssertionError("The click target must follow the translated Canvas: "+order);
   if(CanvasWidget.hasDrawingLayer(null)||CanvasWidget.requestDraw(null))
    throw new AssertionError("An unmounted Disc Canvas must tolerate redraw requests");
   System.out.println("PASS real Box ABI and independently-sized, clickable Disc Canvas with its own recording layer");

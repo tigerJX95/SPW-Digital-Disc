@@ -6,14 +6,14 @@ final class DiscTransition {
  enum Phase { IDLE, WAITING, TRACK_WAIT, COVER, OPENING, OPEN, CLOSING, FINISHED }
  record Pose(float exposed,float scale,float centered) {}
  private Phase phase=Phase.IDLE;
- private long started,duration,brakeDuration,coverDuration,openingDuration;
+ private long started,duration,brakeDuration,coverDuration,openingDuration,coverReturnDuration,coverOverlap;
  private DiscSettings.Speed speed=DiscSettings.Speed.STANDARD;
  void setSpeed(DiscSettings.Speed speed){this.speed=speed;}
  private float exposure,scale=1,closeFrom,centered,closeCentered;
  private float brakeFrom,brakeCentered;
  private double brakeVelocity;
- private boolean pageEntry,coverOnlyReturn;
- private float returnScale;
+ private boolean pageEntry;
+ private float returnScale,returnCentered;
  private Runnable completion;
  Phase phase(){return phase;}
  Pose pose(){return new Pose(exposure,scale,centered);}
@@ -27,21 +27,27 @@ final class DiscTransition {
   phase=Phase.TRACK_WAIT;exposure=0;scale=1;centered=0;pageEntry=false;completion=null;
  }
  void trackReady(long now){if(phase==Phase.TRACK_WAIT){phase=Phase.OPENING;started=now;openingDuration=speed.duration(700_000_000L);}}
- void reset(){phase=Phase.IDLE;exposure=0;scale=1;centered=0;completion=null;brakeDuration=0;brakeVelocity=0;coverOnlyReturn=false;}
+ void reset(){phase=Phase.IDLE;exposure=0;scale=1;centered=0;completion=null;brakeDuration=0;brakeVelocity=0;coverReturnDuration=0;}
  void close(long now,Runnable done){
   close(now,done,true);
  }
  void close(long now,Runnable done,boolean visibleDisc){
+  close(now,done,visibleDisc,false);
+ }
+ void close(long now,Runnable done,boolean visibleDisc,boolean returnToOrigin){
   if(phase==Phase.CLOSING||phase==Phase.FINISHED)return;
   tick(now);
-  if(!visibleDisc||phase==Phase.IDLE||phase==Phase.WAITING||phase==Phase.TRACK_WAIT){phase=Phase.FINISHED;exposure=0;scale=1;done.run();return;}
+  if((!visibleDisc&&!returnToOrigin)||phase==Phase.IDLE||phase==Phase.WAITING
+      ||(phase==Phase.TRACK_WAIT&&!returnToOrigin)){
+   phase=Phase.FINISHED;exposure=0;scale=1;done.run();return;
+  }
   completion=done;
-  // The cover has finished enlarging at the first opening frame, before any disc travel.
-  if(pageEntry&&exposure==0&&scale>COVER_START_SCALE){
-   coverOnlyReturn=true;
-   returnScale=scale;
+  if(!visibleDisc||exposure==0){
+   if(scale<=COVER_START_SCALE||(!returnToOrigin&&!pageEntry)){finish();return;}
+   exposure=0;returnScale=scale;returnCentered=centered;
    started=now;
-   duration=speed.duration(180_000_000L);
+   brakeDuration=duration=coverOverlap=0;
+   coverReturnDuration=speed.duration(180_000_000L);
    phase=Phase.CLOSING;
    return;
   }
@@ -61,6 +67,11 @@ final class DiscTransition {
   started=now;duration=(long)(speed.duration(650_000_000L)*Math.sqrt(closeFrom));
   // With no exposed pixels there is no return motion to wait for.
   if(closeFrom==0){finish();return;}
+  // Start moving the cover while the last sliver of the disc is retracting.
+  coverReturnDuration=returnToOrigin?Math.min(speed.duration(160_000_000L),duration/3):0;
+  duration-=coverReturnDuration;
+  coverOverlap=returnToOrigin?Math.min(speed.duration(70_000_000L),duration/6):0;
+  returnScale=returnCentered=1;
   phase=Phase.CLOSING;
  }
  boolean tick(long now){
@@ -75,18 +86,24 @@ final class DiscTransition {
    if(t>=1){phase=Phase.OPEN;exposure=1;}
   }else if(phase==Phase.CLOSING){
    long elapsed=now-started;
-   if(coverOnlyReturn){
-    float t=unit(elapsed,duration);
-    scale=returnScale+(COVER_START_SCALE-returnScale)*smoother(t);
-    if(t>=1){scale=COVER_START_SCALE;finish();}
-   }else if(elapsed<brakeDuration){
+   long discEnd=brakeDuration+duration;
+   if(elapsed<brakeDuration){
     double u=unit(elapsed,brakeDuration);
     exposure=Math.min(closeFrom,brakeFrom+(float)(brakeVelocity*brakeDuration/1_000_000_000.0*(u-u*u+u*u*u/3)));
     centered=pageEntry?Math.max(0,brakeCentered-(exposure-brakeFrom)):brakeCentered;
    }else{
     float t=unit(elapsed-brakeDuration,duration),eased=smoother(t);
-    exposure=closeFrom*(1-eased);centered=closeCentered+(1-closeCentered)*eased;
-    if(t>=1)finish();
+    exposure=closeFrom*(1-eased);
+    centered=duration==0?returnCentered:closeCentered+(1-closeCentered)*eased;
+    if(coverReturnDuration==0){
+     if(t>=1)finish();
+    }else{
+     float cover=unit(elapsed-discEnd+coverOverlap,coverReturnDuration+coverOverlap);
+     float shrink=smoother(cover);
+     scale=returnScale+(COVER_START_SCALE-returnScale)*shrink;
+     if(duration==0)centered=returnCentered+(1-returnCentered)*shrink;
+     if(cover>=1){scale=COVER_START_SCALE;finish();}
+    }
    }
   }
   return old!=exposure||oldScale!=scale||oldCentered!=centered||before!=phase;
@@ -100,7 +117,7 @@ final class DiscTransition {
  // displacement is below a physical pixel. Normal tick() timing stays exact;
  // callers without measured geometry retain the full animation duration.
  boolean finishSubpixelReturn(long now,float travelPixels){
-  if(phase!=Phase.CLOSING||coverOnlyReturn||now-started<=brakeDuration||!Float.isFinite(travelPixels)||travelPixels<=0)return false;
+  if(phase!=Phase.CLOSING||coverReturnDuration>0||now-started<=brakeDuration||!Float.isFinite(travelPixels)||travelPixels<=0)return false;
   float remaining=Math.max(exposure,1-centered)*travelPixels;
   if(remaining>.75f)return false;
   finish();return true;

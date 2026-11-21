@@ -92,6 +92,9 @@ public class HostBindingsTest {
   var getter=service.getMethod("getPlayer");
   check(getter.getDeclaringClass().getName().equals(profile.playback().get(1).name()),"getPlayer resolves the release-specific base class");
   check(getter.getReturnType().getMethod("ՠ").getReturnType()==boolean.class,"playing getter ABI");
+  var playback=new PlaybackStateReader();
+  check(playback.prepare(warning->{throw new AssertionError(warning);}),"read-only playback binding can be prepared before the first rotation");
+  check(playback.prepare(warning->{throw new AssertionError(warning);}),"existing playback binding needs no repeated lookup");
   check(java.util.Arrays.stream(Class.forName(profile.painter(),false,loader).getDeclaredFields()).filter(f->f.getType()==org.jetbrains.skia.Shader.class).count()==1,"detected cover exposes one shader");
   System.out.println("PASS "+profile.version()+" actual cover invocation, mapped method signatures, composition-local binding, painter shader and playback-base resolution (native pixels/audio excluded)");
  }

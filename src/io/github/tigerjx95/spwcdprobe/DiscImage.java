@@ -52,10 +52,11 @@ final class DiscImage implements AutoCloseable {
    var canvas=surface.getCanvas();canvas.scale(w/sourceWidth,h/sourceHeight);
    canvas.drawRect(new Rect(0,0,sourceWidth,sourceHeight),paint);
    try(Image image=surface.makeImageSnapshot()){
-    bitmap=Bitmap.Companion.makeFromImage(image);DiscImage result=new DiscImage(bitmap);bitmap=null;return result;
+    bitmap=Bitmap.Companion.makeFromImage(image);bitmap.setImmutable();DiscImage result=new DiscImage(bitmap);bitmap=null;return result;
    }
   }finally{if(bitmap!=null)bitmap.close();}
  }
+ Image snapshot(){return Image.Companion.makeFromBitmap(nativeBitmap);}
  float aspect(){return (float)width/height;}
  void drawCover(DrawScope scope,float w,float h)throws Exception{
   DRAW_IMAGE.invoke(scope,bitmap,0L,pack(width,height),0L,pack(Math.max(1,Math.round(w)),Math.max(1,Math.round(h))),1f,Fill.INSTANCE,null,3);

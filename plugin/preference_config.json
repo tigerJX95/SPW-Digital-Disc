@@ -87,7 +87,7 @@
           "entries": ["关闭", "自动裁切对边", "仅裁右侧白边"],
           "entry_values": ["OFF", "PAIRED", "RIGHT"],
           "default_value": "OFF"
-        }
+                }
       ]
     }
   ]

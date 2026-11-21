@@ -45,6 +45,56 @@ public class ReturnHandoffTest {
   advance.invoke(frame,T+1_600_000_000L);check(n.get()==0,"production clock waits for visible tail");
   advance.invoke(frame,T+1_645_000_000L);check(n.get()==1&&motion.finished(),"production clock performs early pixel-bounded handoff");
   var pose=(MutableState<?>)field(type,"pose").get(frame);check(pose.getValue().equals(motion.pose()),"published pose agrees with completion");
+  checkCoverReturn(type,frame,motion,pose,advance);
   System.out.println("PASS subpixel bounds across five window widths, exact once navigation, invalid geometry fallback, interrupted brake, cancellation and actual Frame clock");
+ }
+
+ static void checkCoverReturn(Class<?> type,Object frame,DiscTransition motion,
+     MutableState<?> pose,Method advance)throws Exception{
+  var originField=field(type,"coverOrigin");
+  var originCtor=originField.getType().getDeclaredConstructors()[0];originCtor.setAccessible(true);
+  var viewport=((MutableState<?>)field(type,"viewport").get(frame)).getValue();
+  var bounds=new androidx.compose.ui.geometry.Rect(10,20,310,320);
+  originField.set(frame,originCtor.newInstance(viewport,bounds));
+  field(type,"coverHandoff").set(frame,CoverHandoff.from(bounds,500,1));
+  field(type,"suppressionApplied").setBoolean(frame,true);
+  var close=type.getDeclaredMethod("closeMotion",long.class,Runnable.class,boolean.class);close.setAccessible(true);
+  long start=T+1_000_000_000L;
+  for(boolean disc:new boolean[]{true,false}){
+   motion.enter();motion.ready(T);motion.tick(T+940_000_000L);
+   var calls=new AtomicInteger();
+   Runnable returnToPlayer=()->{
+    check(pose.getValue().equals(motion.pose()),"host callback receives the final pose");
+    check(motion.pose().scale()==DiscTransition.COVER_START_SCALE,"cover is at native size before handoff");
+    calls.incrementAndGet();
+   };
+   close.invoke(frame,start,returnToPlayer,disc);
+   long travel=disc?420_000_000L:0L,slide=disc?230_000_000L:180_000_000L;
+   if(disc){
+    advance.invoke(frame,start+travel);
+    check(motion.pose().exposed()>0&&motion.pose().scale()==1,"cover waits until the disc is almost hidden");
+    advance.invoke(frame,start+travel+40_000_000L);
+    check(motion.pose().exposed()>0&&motion.pose().scale()<1,"cover starts moving before the disc tail ends");
+    float movingScale=motion.pose().scale();
+    advance.invoke(frame,start+490_000_000L);
+    check(motion.pose().exposed()==0&&motion.pose().scale()<movingScale,"cover keeps moving across the end of retraction");
+   }
+   else{
+    advance.invoke(frame,start);
+    check(motion.pose().exposed()==0&&motion.pose().scale()==1,"cover-only return starts from the current pose");
+   }
+   advance.invoke(frame,start+travel+slide/2);
+   check(Math.abs(motion.pose().scale()-.97f)<.001f&&calls.get()==0,"cover slide cannot skip to the native view");
+   advance.invoke(frame,start+travel+slide);
+   advance.invoke(frame,start+2_000_000_000L);
+   check(motion.finished()&&calls.get()==1,"both return modes finish within their existing time budget");
+  }
+  var waiting=new DiscTransition();
+  waiting.trackChanged();
+  waiting.close(T,()->{},true,true);
+  check(waiting.pose().centered()==0,"return from track wait keeps its current center on the first frame");
+  waiting.tick(T+90_000_000L);
+  check(Math.abs(waiting.pose().centered()-.5f)<.001f,"track-wait return recenters smoothly");
+  System.out.println("PASS overlapping disc and cover within 650 ms, cover-only return, track-wait continuity and final pose before host takeover");
  }
 }

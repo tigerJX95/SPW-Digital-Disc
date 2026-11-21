@@ -27,6 +27,13 @@ public class RootRasterTest {
      var ellipse=new Ellipse2D.Float(r.getLeft(),r.getTop(),r.getWidth(),r.getHeight());
      area.add(new java.awt.geom.Area(ellipse));outline.append(ellipse,false);return null;
     }
+    if(m.getName().equals("addRoundRect")){
+     var r=(androidx.compose.ui.geometry.RoundRect)a[0];
+     long radius=(Long)r.getClass().getMethod("getTopLeftCornerRadius-kKHJgLs").invoke(r);
+     var round=new RoundRectangle2D.Float(r.getLeft(),r.getTop(),r.getWidth(),r.getHeight(),
+         2*RootRenderer.x(radius),2*RootRenderer.y(radius));
+     area.add(new java.awt.geom.Area(round));outline.append(round,false);return null;
+    }
     switch(m.getName()){
      case "moveTo"->{outline.moveTo((Float)a[0],(Float)a[1]);return null;}
      case "lineTo"->{outline.lineTo((Float)a[0],(Float)a[1]);return null;}
