@@ -31,7 +31,7 @@ tests = [
     'RevealCycleTest', 'DiscExposureTest', 'DiscSettingsTest', 'PreferenceSchemaTest', 'FrontSettingsTest', 'FrontRendererTest', 'FrontDiscMotionTest', 'DiscRotationTest', 'RotationSettingsTest', 'RotationRendererTest', 'DiscMotionContinuityTest', 'TimedDiscMotionRasterTest', 'RotationHandoffTest', 'HostCompatibilityTest', 'PluginSourceMetadataTest', 'HostBindingsTest', 'DynamicHostBindingsTest',
 ]
 if first_reveal_only:
-    tests = ['FirstRevealPreparationTest', 'ReflectionTest', 'EntryTimingTest', 'CoverHandoffTest', 'ReelEntryRasterTest']
+    tests = ['FirstRevealPreparationTest', 'ReflectionTest', 'EntryTimingTest', 'CoverHandoffTest', 'ReelEntryRasterTest', 'VinylRendererTest']
 qa = root / 'build/qa'
 qa.mkdir(parents=True, exist_ok=True)
 for test in tests:

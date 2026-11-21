@@ -28,7 +28,11 @@ public class ProductionRotationHandoffTest {
    angle.setValue(rotation.sample("a",true,true,true,t+1_700_000_000L));
    check(angle.getValue()>0,"rotating before return");
    var completed=new AtomicInteger();
-   close.invoke(frame,t+2_000_000_000L,(Runnable)completed::incrementAndGet,exposed);
+   close.invoke(frame,t+2_000_000_000L,(Runnable)()->{
+    check(pose.getValue().equals(motion.pose()),"host callback sees the completed return pose");
+    completed.incrementAndGet();
+   },exposed);
+   check(pose.getValue().exposed()==(exposed?1:0),"return boundary publishes pose immediately");
    float frozen=angle.getValue();
    check(frozen>18,"return boundary samples elapsed angle once");
    for(int ms=1;ms<=700;ms++){
@@ -36,7 +40,6 @@ public class ProductionRotationHandoffTest {
     check(rotation.sample("a",true,true,false,t+2_000_000_000L+ms*1_000_000L)==frozen,"no extra timer rotation during retraction");
    }
    check(completed.get()==1&&motion.finished(),"single return after motion completion");
-   check(pose.getValue().exposed()==(exposed?1:0),"return boundary publishes pose immediately");
    // Source observation may run before the next animation timer or draw.
    observe.invoke(frame,"b");check(angle.getValue()==0,"new source clears cached angle synchronously");
    check(rotation.sample("b",true,true,false,t+4_000_000_000L)==0,"new disc waits upright");

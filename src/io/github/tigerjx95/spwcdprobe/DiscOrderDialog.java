@@ -124,8 +124,14 @@ public final class DiscOrderDialog implements AutoCloseable {
   cancel.addActionListener(event->close.run());
   var confirm=new ActionButton("确认",true);
   confirm.addActionListener(event->{
-   if(saveOrder.test(Collections.list(model.elements())))close.run();
-   else JOptionPane.showMessageDialog(list,"无法保存自定义盘面查找顺序。","保存失败",JOptionPane.ERROR_MESSAGE);
+   var orderToSave=Collections.list(model.elements());
+   list.setEnabled(false);reset.setEnabled(false);cancel.setEnabled(false);confirm.setEnabled(false);
+   DiscAppearanceDialog.runSave(()->saveOrder.test(orderToSave),saved->{
+    if(!list.isDisplayable())return;
+    if(saved){close.run();return;}
+    list.setEnabled(true);reset.setEnabled(true);cancel.setEnabled(true);confirm.setEnabled(true);
+    JOptionPane.showMessageDialog(list,"无法保存自定义盘面查找顺序。","保存失败",JOptionPane.ERROR_MESSAGE);
+   });
   });
 
   var heading=new JPanel(new BorderLayout(0,12));
@@ -273,7 +279,7 @@ public final class DiscOrderDialog implements AutoCloseable {
  }
 
  private static void move(JList<String> list,DefaultListModel<String> model,int from,int to){
-  if(from<0||from>=model.size()||to<0||to>=model.size()||from==to)return;
+  if(!list.isEnabled()||from<0||from>=model.size()||to<0||to>=model.size()||from==to)return;
   model.add(to,model.remove(from));
   list.setSelectedIndex(to);
  }

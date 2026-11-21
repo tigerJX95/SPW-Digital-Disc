@@ -19,24 +19,34 @@ final class PlaybackStateReader {
   return match;
  }
  private void verifyHost(){HostCompatibility.current().verifyPlayback(getClass().getClassLoader());}
- boolean playing(Consumer<String> report){
+ boolean prepare(Consumer<String> report){
   if(unsupported)return false;
+  if(service!=null)return true;
   try{
-   if(service==null){
-    // A structural mismatch is stable for this plugin class loader.
-    unsupported=true;
-    verifyHost();
-    ClassLoader loader=getClass().getClassLoader();
-    Field next=Class.forName("com.xuncorp.voxzen.service.PlaybackController",false,loader).getDeclaredField("service");next.setAccessible(true);
-    if(!Modifier.isStatic(next.getModifiers()))throw new NoSuchFieldException("Playback service is not static");
-    player=next.getType().getMethod("getPlayer");
-    isPlaying=resolvePlaying(player.getReturnType());
-    service=next;
-    unsupported=false;
-   }
+   // A structural mismatch is stable for this plugin class loader.
+   unsupported=true;
+   verifyHost();
+   ClassLoader loader=getClass().getClassLoader();
+   Field next=Class.forName("com.xuncorp.voxzen.service.PlaybackController",false,loader).getDeclaredField("service");next.setAccessible(true);
+   if(!Modifier.isStatic(next.getModifiers()))throw new NoSuchFieldException("Playback service is not static");
+   player=next.getType().getMethod("getPlayer");
+   isPlaying=resolvePlaying(player.getReturnType());
+   service=next;
+   unsupported=false;
+   return true;
+  }catch(ReflectiveOperationException|RuntimeException|LinkageError unavailable){
+   unavailable(report,unavailable);return false;
+  }
+ }
+ boolean playing(Consumer<String> report){
+  if(!prepare(report))return false;
+  try{
    Object host=service.get(null);return host!=null&&Boolean.TRUE.equals(isPlaying.invoke(player.invoke(host)));
   }catch(ReflectiveOperationException|RuntimeException|LinkageError unavailable){
-   if(!warned){warned=true;report.accept("ROTATION_STATE_UNAVAILABLE "+unavailable.getClass().getSimpleName());}return false;
+   unavailable(report,unavailable);return false;
   }
+ }
+ private void unavailable(Consumer<String> report,Throwable error){
+  if(!warned){warned=true;report.accept("ROTATION_STATE_UNAVAILABLE "+error.getClass().getSimpleName());}
  }
 }

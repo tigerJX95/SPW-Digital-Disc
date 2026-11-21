@@ -86,6 +86,7 @@ final class DiscSettings implements AutoCloseable {
   final String label;
   Style(String label){this.label=label;}
   boolean reel(){return this==REEL||this==REEL_COVER;}
+  boolean vinyl(){return this==BLACK_VINYL||this==COLORED_VINYL;}
  }
  enum ArtworkKind { CUSTOM, GENERATED, UNKNOWN }
  record ArtworkSource(String description,ArtworkKind kind){
@@ -105,13 +106,14 @@ final class DiscSettings implements AutoCloseable {
   }
   Values(int amount,boolean front,boolean rotate,boolean vinyl){this(amount,front,rotate,vinyl,Speed.STANDARD,Speed.STANDARD);}
   Appearance appearanceFor(AlbumKey album){return album==null?appearance:albumStyles.getOrDefault(album,appearance);}
-  boolean vinyl(){return appearance.style()==Style.BLACK_VINYL||appearance.style()==Style.COLORED_VINYL;}
+  boolean vinyl(){return appearance.style().vinyl();}
   VinylColor vinylColor(){return appearance.finish();}
  }
  static final Values DEFAULT=new Values(DiscExposure.DEFAULT,false,false,false);
  private final ConfigManager manager;
  private final ConfigHelper appearanceConfig;
  private volatile Map<AlbumKey,Appearance> albumStyles=Map.of();
+ private volatile List<String> localOrder=LocalDiscService.DEFAULT_NAMES;
  private final Consumer<Values> update;
  private final AtomicLong revision=new AtomicLong();
  private final Consumer<ConfigHelper> listener=this::changed;
@@ -122,15 +124,21 @@ final class DiscSettings implements AutoCloseable {
   this(manager,update,()->new ArtworkSource("盘面来源暂不可用"),()->null);
  }
  DiscSettings(ConfigManager manager,Consumer<Values> update,Supplier<ArtworkSource> artworkSource,Supplier<AlbumKey> playingAlbum){
+  this(manager,update,artworkSource,playingAlbum,appearance->{});
+ }
+ DiscSettings(ConfigManager manager,Consumer<Values> update,Supplier<ArtworkSource> artworkSource,Supplier<AlbumKey> playingAlbum,
+     Consumer<Appearance> prepareDefault){
   this.manager=manager;this.update=update;
   try{
    appearanceConfig=manager.getConfig(APPEARANCE_CONFIG);
-   migrateAppearance(manager.getConfig("config.json"));
+   var runtimeConfig=manager.getConfig("config.json");
+   migrateAppearance(runtimeConfig);
    albumStyles=readAlbumStyles();
+   localOrder=readOrder(runtimeConfig);
    manager.addConfigChangeListener("config.json",listener);
-   update.accept(read(manager.getConfig("config.json")));
+   update.accept(read(runtimeConfig));
    orderDialog=new DiscOrderDialog(this,artworkSource);
-   appearanceDialog=new DiscAppearanceDialog(this,playingAlbum,artworkSource);
+   appearanceDialog=new DiscAppearanceDialog(this,playingAlbum,artworkSource,prepareDefault);
   }catch(RuntimeException error){close();throw error;}
  }
  private Values read(ConfigHelper config){
@@ -142,7 +150,7 @@ final class DiscSettings implements AutoCloseable {
   boolean rotate;
   try{Object value=config.get(ROTATE_KEY,false);rotate=Boolean.TRUE.equals(value)||value instanceof String text&&text.equalsIgnoreCase("true");}
   catch(RuntimeException invalid){rotate=false;}
-  return new Values(amount,front,rotate,appearance(config),speed(config,MOTION_SPEED_KEY),speed(config,ROTATION_SPEED_KEY),localNames(config),trimCover(config),albumStyles);
+  return new Values(amount,front,rotate,appearance(config),speed(config,MOTION_SPEED_KEY),speed(config,ROTATION_SPEED_KEY),localOrder,trimCover(config),albumStyles);
  }
  static CoverWhiteBorders.Mode trimCover(ConfigHelper config){
   try{
@@ -254,34 +262,42 @@ final class DiscSettings implements AutoCloseable {
   return true;
  }
  private boolean persistAppearance(Appearance appearance){
+  return persistSetting(STYLE_KEY,encodeAppearance(appearance));
+ }
+ private boolean persistSetting(String key,String value){
   try{
-   Object previous=appearanceConfig.get(STYLE_KEY,"");
-   appearanceConfig.set(STYLE_KEY,encodeAppearance(appearance));
+   Object previous=appearanceConfig.get(key,"");
+   appearanceConfig.set(key,value);
    try{
     if(appearanceConfig.save())return true;
-   }catch(RuntimeException invalid){ /* Restore the previous selection below. */ }
-   appearanceConfig.set(STYLE_KEY,previous);
+   }catch(RuntimeException invalid){ /* Restore the previous value below. */ }
+   appearanceConfig.set(key,previous);
   }catch(RuntimeException invalid){return false;}
   return false;
  }
- List<String> order(){return localNames(manager.getConfig("config.json"));}
+ List<String> order(){return localOrder;}
  synchronized boolean saveOrder(List<String> order){
   if(!active)return false;
   try{
-   ConfigHelper config=manager.getConfig("config.json");
-   Object previous=config.get(LOCAL_NAMES_KEY,"");
-   config.set(LOCAL_NAMES_KEY,String.join(",",order));
-   if(config.save()){
-    changed(config);
-    return true;
-   }
-   config.set(LOCAL_NAMES_KEY,previous);
+   var next=LocalDiscService.candidateNames(String.join(",",order));
+   var runtimeConfig=manager.getConfig("config.json");
+   if(!persistSetting(LOCAL_NAMES_KEY,String.join(",",next)))return false;
+   localOrder=next;
+   changed(runtimeConfig);
+   return true;
   }catch(RuntimeException invalid){return false;}
-  return false;
  }
- private static List<String> localNames(ConfigHelper config){
-  try{return LocalDiscService.candidateNames(config.get(LOCAL_NAMES_KEY,""));}
-  catch(RuntimeException invalid){return LocalDiscService.DEFAULT_NAMES;}
+ private List<String> readOrder(ConfigHelper runtimeConfig){
+  String saved=storedOrder(appearanceConfig);
+  if(!saved.isBlank())return LocalDiscService.candidateNames(saved);
+  String legacy=storedOrder(runtimeConfig);
+  var order=LocalDiscService.candidateNames(legacy);
+  if(!legacy.isBlank())persistSetting(LOCAL_NAMES_KEY,String.join(",",order));
+  return order;
+ }
+ private static String storedOrder(ConfigHelper config){
+  try{return Objects.requireNonNullElse(config.get(LOCAL_NAMES_KEY,""),"");}
+  catch(RuntimeException invalid){return "";}
  }
  private static VinylColor vinylColor(ConfigHelper config){
   try{return VinylColor.valueOf(config.get(VINYL_COLOR_KEY,VinylColor.BLACK.name()));}

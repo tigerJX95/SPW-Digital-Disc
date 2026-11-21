@@ -4,13 +4,13 @@
 
 Adds a digital CD presentation to Salt Player (SPW), with a complete album cover and a CD extending from its right side.
 
-Current stable version: **v1.11.0**
+Current version **v1.12.0**
 
-- Set a disc style for the current album from its own entry in plugin settings. Tracks from the same album share the setting, which can be reset to the global default.
-- Disc style settings save in the background while the player stays responsive.
-- The album dialog identifies the album and shows the artwork source at the time it was opened. It highlights when custom artwork takes priority, and the lookup-order dialog explains whether changing the order applies to the current track.
-- Compatibility logs now give a reason when host interface checks fail.
-- With CUE for Salt Player v0.6.0 enabled, switching CUE tracks within the same audio file also replays the disc eject animation.
+- A new cover transition plays before the disc slides out. Clicking the cover smoothly moves it from its original position to the center while enlarging it.
+- The cover starts to shrink and slide back as the disc finishes retracting, or returns directly in cover-only mode. The click target follows the animation. The cover and reflection share the same rounded corners throughout.
+- The cover smoothly aligns with the native cover's position and size before the handoff to prevent a jump. It also returns to the native cover area after switching tracks in the expanded view.
+- The custom disc artwork lookup order is retained when upgrading or adjusting settings such as disc exposure.
+- Improves the first eject after changing the default disc style and fixes a hitch when switching to solid-color open-reel tape with rotation enabled.
 
 [Update history](CHANGELOG.md) (Chinese)
 
@@ -40,7 +40,7 @@ I wanted to bring this digital record experience to Salt Player: enjoying the co
 - **Disc exposure setting**: open SPW Digital Disc settings in the plugin manager and adjust 0–100. Default 50 preserves the existing view; 100 shows the full disc. The host saves the value. The group fits the window, and cover-only mode returns without a retract delay.
 - **Cross-album disc cache**: keeps up to 4 custom images under a combined 32 MiB normalized-pixel budget, including the active image. Least recently used entries are evicted. Candidate priority, file size, modification time and available file identity are checked before reuse; changed or deleted files are invalidated. Disabling the plugin or clearing current media releases the cache. Generated cover discs continue to use the host’s valid cover result.
 - **Playback-linked rotation**: enable “Rotate while playing” to start gently over about 240 ms after ejection, then rotate once every 20 seconds at Standard speed. Pause and retraction freeze the angle; resume starts gently from that angle. Off by default; the cover stays still.
-- **Page animations**: the cover enlarges first, then the CD gradually slides out from behind it. Clicking the combined display to return retracts the CD before invoking the native return action. The reflection follows the same animation progress. Normal track changes replay the eject animation without rescaling the cover; rapid changes eject only the last stably selected song's disc.
+- **Page animations.** The cover moves toward the center while enlarging, then the CD slides out. Clicking the combined display retracts the CD, with the cover shrinking back to its original position as the disc finishes retracting. The reflection and click target follow the animation. The cover keeps its size on track changes, and rapid changes replay the eject animation for the last selection once it settles. With CUE for Salt Player v0.6.0 enabled, switching tracks within the same audio file also replays the eject animation.
 - **Combined reflection**: the cover and CD have a short reflection that fades downward.
 - Artwork on local disks and accessible network shares is read only. Generated artwork is kept in memory for display.
 
@@ -50,15 +50,15 @@ https://github.com/user-attachments/assets/8a289172-d79b-4e2e-9ba2-c7dc9ee5d86c
 
 ## Installation and use
 
-**v1.10.0** was tested successfully with SPW on Windows (Microsoft Store and Steam) and Linux (Steam). Interface mappings cover SPW 1.19.0 and 1.19.3 from the Microsoft Store. The plugin uses SPW's internal drawing interfaces, so later SPW versions may require compatibility updates.
+The plugin includes interface mappings for SPW 1.19.0 and 1.19.3 from the Microsoft Store. See the verification section for this release and the [changelog](CHANGELOG.md) for results from earlier releases.
 
 1. Obtain the compiled `.spmod` file. The source ZIP cannot be installed directly; see the build instructions below to compile it yourself.
 2. In SPW's plugin manager, use the local plugin import option to select the `.spmod` file.
 3. Grant `class-transform` and `library-read` when prompted, enable the plugin, and restart SPW.
 4. Play a song from the local machine or an accessible network share. Click the bottom playback bar to open the primary detail page, then click the album cover to open the secondary display page.
-5. On the secondary page, click the combined cover/CD display to return. The CD retracts before the primary page returns. You can also return while the CD is sliding out; repeated clicks do not queue multiple return actions.
+5. On the secondary page, click the cover or CD to return. The cover starts shrinking back to its original position as the disc finishes retracting. You can also return during enlargement or ejection. Repeated clicks are handled once.
 
-At Standard speed, ejection takes about 700 ms and full retraction up to about 650 ms, with quintic easing at the endpoints. A final displacement below one physical pixel can complete early before invoking native return. Returning during ejection preserves the current pose and brakes for up to about 80 ms before retracting, without passing the original endpoint. Returning from a fully open disc adds no braking delay.
+At Standard speed, ejection takes about 700 ms. Returning from a fully open disc takes about 650 ms, with the cover shrinking and sliding back over the last 230 ms. In cover-only mode, the return takes about 180 ms. If changing the window or another event makes the original position unavailable, the display returns after disc retraction. Returning during ejection preserves the current pose and brakes for up to about 80 ms before retracting.
 
 After a track change, the plugin waits for a selection-stability interval of about 280 ms and for the cover and disc lookup to be ready before ejecting the disc. Further track changes during this interval replace the pending request; intermediate songs are not replayed in sequence. Once a cover source takes over, old nodes from that transition cannot overwrite it. When the page is collapsed to the playback bar and reopened, the plugin waits until the host has fully expanded before replaying the cover-first entry and disc eject animations. The expansion process does not consume the disc animation's time.
 
@@ -106,7 +106,7 @@ The main supported and tested range is **1000 × 1000 to 4000 × 4000 pixels**, 
 
 ## Settings
 
-Open SPW Digital Disc settings in the plugin manager. The host saves and restores these settings.
+Open SPW Digital Disc settings in the plugin manager. Settings are restored after a restart. The plugin stores the custom disc artwork lookup order in its disc appearance settings and carries over the previous order when upgrading.
 
 | Setting | Default | Behavior |
 | --- | --- | --- |
@@ -121,20 +121,13 @@ Front mode moves the complete disc with a short uniform fade at entry and exit. 
 
 Only the disc rotates; the cover stays upright and the reflection shares the angle. Each start accelerates smoothly from rest over about 240 ms, then follows the selected speed (20 seconds per turn at Standard). Pausing or starting retraction freezes the current angle immediately. Playback resumes gently from that angle without replaying paused time. A new track starts upright. Ejection, retraction and exposure 0 do not rotate. Collapsing the secondary page to the mini player freezes the angle; reopening resumes after ejection completes. Returning to the primary page ends that presentation, so entering the secondary page again starts upright. Disabling rotation restores the upright orientation.
 
-## Verified SPW host versions
+## v1.12.0 verification
 
-| SPW host | Interface mapping | V1.4 offline regression |
-| --- | --- | --- |
-| 1.19.0 Microsoft Store | Adapted | 48 programs pass |
-| 1.19.3 Microsoft Store | Adapted | 48 programs pass |
+| SPW host | Offline regression |
+| --- | --- |
+| 1.19.3 Microsoft Store | 52 tests passed |
 
-Verified on physical machines:
-
-| SPW channel | Operating system | V1.11.0 result |
-| --- | --- | --- |
-| Microsoft Store | Windows | Passed |
-| Steam | Windows | Passed |
-| Steam | Ubuntu 26.04.1 LTS (Linux) | Passed |
+Native checks on Windows 11 with SPW 1.19.3 Steam covered the first opening after startup with black vinyl and reel-to-reel, and the first opening after switching in both directions between reel-to-reel and album-cover CD and between black vinyl and colored vinyl. With rotation enabled, switching from album-cover CD to the Ivory White and Champagne Gold reels used the prepared artwork for both the first eject and the start of rotation.
 
 Offline tests cover interface resolution, cover calls, configuration storage, images, animations and rotation state. They do not run Windows native playback or Skia rendering. Startup verifies playback-controller and sheet-state fingerprints, then locates the cover entry, caller and sheet-state accessor using metadata, signatures and a unique call relationship. The cover painter must be the unique structural match and pass an implementation fingerprint normalized for its own obfuscated identifiers and debug metadata. Discovery results are cached per host class loader. Missing or ambiguous targets prevent activation with a detailed error. Startup also validates playback and artwork-loading interfaces and rejects incompatible hosts. If playback state cannot be read during operation, rotation stops and a warning is logged.
 
@@ -215,7 +208,7 @@ If using PowerShell, configure the same environment variables and run this in th
 After the build reports `BUILD SUCCESSFUL`, look in the source directory's `dist` folder for:
 
 ```text
-SPW_Digital_Disc_v1.11.0.spmod
+SPW_Digital_Disc_v1.12.0.spmod
 ```
 
 This is the installation package that SPW can import. You do not need to ZIP the entire source directory or rename its extension. The `build` directory contains intermediate build output, not the installation package.

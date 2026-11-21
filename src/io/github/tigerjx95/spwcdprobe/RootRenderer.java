@@ -6,6 +6,7 @@ import androidx.compose.ui.graphics.ColorKt;
 import androidx.compose.ui.graphics.Path;
 import androidx.compose.ui.graphics.SkiaBackedPath_skikoKt;
 import androidx.compose.ui.geometry.Rect;
+import androidx.compose.ui.geometry.RoundRectKt;
 import java.util.function.Supplier;
 import androidx.compose.ui.graphics.drawscope.*;
 import java.lang.reflect.Method;
@@ -16,13 +17,42 @@ final class RootRenderer {
   void draw(DrawScope scope,float width,float height)throws Exception;
   default boolean blankDisc(){return false;}
  }
- interface Disc {boolean draw(DrawScope scope,float cx,float cy,float diameter)throws Exception;}
+ interface Disc {
+  boolean draw(DrawScope scope,float cx,float cy,float diameter)throws Exception;
+  default boolean drawReelTape(DrawScope scope,float radius){return false;}
+  default boolean drawVinylSurface(DrawScope scope,float radius){return false;}
+ }
+ static final class CoverCorners {
+  private Path path;
+  private float width,height,radius;
+  Path outline(Supplier<Path> paths,float width,float height,float radius){
+   radius=Math.min(radius,Math.min(width,height)*.5f);
+   if(path==null||this.width!=width||this.height!=height||this.radius!=radius){
+    Path outline=paths.get();
+    outline.addRoundRect(RoundRectKt.RoundRect(0,0,width,height,radius,radius),Path.Direction.Clockwise);
+    path=outline;
+    this.width=width;this.height=height;this.radius=radius;
+   }
+   return path;
+  }
+ }
  private static final Method CLIP,CLIP_RECT,CIRCLE,BRUSH_CIRCLE,RADIAL,LINEAR,BOX_COLOR,SIZE,INTRINSIC,DRAW;
  private static final Constructor<Stroke> STROKE;
  private record Finish(float radius,Stroke line,Stroke edge,Brush hub,Brush metal,Brush innerLip,Stroke bevel,Stroke lip){}
- private static volatile Finish cachedFinish;
  private record VinylFinish(float radius,DiscSettings.VinylColor color,Path grooves,Path label,Path hole,Path spindleInset,Stroke grooveStroke,Stroke rim,Brush surface,Brush groovesLight,Brush falloff){}
- private static volatile VinylFinish cachedVinyl;
+ // Offscreen preparation owns a separate cache until it hands its brushes to the UI thread.
+ static final class Finishes {
+  private volatile Finish cd;
+  private volatile VinylFinish vinyl;
+  private volatile ReelFinish reel;
+ }
+ private static final Finishes liveFinishes=new Finishes();
+
+ static void adoptPrepared(Finishes prepared){
+  if(prepared.cd!=null)liveFinishes.cd=prepared.cd;
+  if(prepared.vinyl!=null)liveFinishes.vinyl=prepared.vinyl;
+  if(prepared.reel!=null)liveFinishes.reel=prepared.reel;
+ }
  private static final Method BRUSH_PATH,SWEEP;
 
  static {
@@ -74,13 +104,16 @@ final class RootRenderer {
   draw(scope,painter,enter,leave,disc,exposure,amount,front,layer,angle,blank,style,color,DiscSettings.ReelColor.DEFAULT);
  }
  static void draw(DrawScope scope,Object painter,Runnable enter,Runnable leave,Disc disc,float exposure,int amount,boolean front,FrontDiscLayer layer,float angle,boolean blank,DiscSettings.Style style,DiscSettings.VinylColor color,DiscSettings.ReelColor reelColor)throws Exception{
+  draw(scope,painter,enter,leave,disc,exposure,amount,front,layer,angle,blank,style,color,reelColor,null,0);
+ }
+ static void draw(DrawScope scope,Object painter,Runnable enter,Runnable leave,Disc disc,float exposure,int amount,boolean front,FrontDiscLayer layer,float angle,boolean blank,DiscSettings.Style style,DiscSettings.VinylColor color,DiscSettings.ReelColor reelColor,CoverCorners corners,float coverRadius)throws Exception{
   long intrinsic=(Long)INTRINSIC.invoke(painter);float iw=x(intrinsic),ih=y(intrinsic);
   if(!Float.isFinite(iw)||!Float.isFinite(ih)||iw<=0||ih<=0){iw=ih=1;}
   final float ratio=iw/ih;
   paint(scope,ratio,new Source(){
    public void draw(DrawScope s,float w,float h)throws Exception{enter.run();try{DRAW.invoke(painter,s,pack(w,h),1f,null);}finally{leave.run();}}
    public boolean blankDisc(){return blank;}
-  },disc,SkiaBackedPath_skikoKt::Path,exposure,amount,front,layer,angle,style,color,false,reelColor);
+  },disc,SkiaBackedPath_skikoKt::Path,exposure,amount,front,layer,angle,style,color,false,reelColor,corners,coverRadius);
  }
  static void paint(DrawScope scope,float aspect,Source source)throws Exception{paint(scope,aspect,source,(s,x,y,d)->false);}
  static void paint(DrawScope scope,float aspect,Source source,Disc disc)throws Exception{
@@ -117,13 +150,13 @@ final class RootRenderer {
   long size=(Long)SIZE.invoke(scope);
   float side=Math.min(y(size),x(size)/DiscExposure.widthFactor(amount));
   if(side<=0||!Float.isFinite(side))return;
-  float radius=(trimmed?Math.min(side,fittedHeight(side,aspect)):side)*.49f;
+  float radius=discRadius(side,aspect,trimmed);
   if(style.reel()){
-   reelFinish(radius,paths,reelColor);
+   reelFinish(radius,paths,reelColor,liveFinishes);
    ReelWordmark.prepare(style==DiscSettings.Style.REEL);
   }else if(style!=DiscSettings.Style.CD){
-   vinylFinish(radius,paths,vinylColor);
-  }else discFinish(radius);
+   vinylFinish(radius,paths,vinylColor,liveFinishes);
+  }else discFinish(radius,liveFinishes);
  }
  // For a generated disc behind the sleeve, the reflection only samples a
  // bottom strip. Skip that disc draw until its circle can touch the strip to
@@ -138,6 +171,9 @@ final class RootRenderer {
   float paddedRadius=side*.49f+2f;
   return dx*dx+dy*dy>paddedRadius*paddedRadius?0f:exposure;
  }
+ static float discRadius(float side,float aspect,boolean trimmed){
+  return (trimmed?Math.min(side,fittedHeight(side,aspect)):side)*.49f;
+ }
  static float fittedWidth(float side,float aspect){return side*Math.min(1f,aspect);}
  static float fittedHeight(float side,float aspect){return side/Math.max(1f,aspect);}
  static void paint(DrawScope scope,float aspect,Source source,Disc disc,Supplier<Path> paths,float exposure,int amount,boolean front,FrontDiscLayer layer,float angle,boolean vinyl,DiscSettings.VinylColor color,boolean fitTrimmed)throws Exception{
@@ -148,6 +184,12 @@ final class RootRenderer {
   paint(scope,aspect,source,disc,paths,exposure,amount,front,layer,angle,style,color,fitTrimmed,DiscSettings.ReelColor.DEFAULT);
  }
  static void paint(DrawScope scope,float aspect,Source source,Disc disc,Supplier<Path> paths,float exposure,int amount,boolean front,FrontDiscLayer layer,float angle,DiscSettings.Style style,DiscSettings.VinylColor color,boolean fitTrimmed,DiscSettings.ReelColor reelColor)throws Exception{
+  paint(scope,aspect,source,disc,paths,exposure,amount,front,layer,angle,style,color,fitTrimmed,reelColor,null,0);
+ }
+ static void paint(DrawScope scope,float aspect,Source source,Disc disc,Supplier<Path> paths,float exposure,int amount,boolean front,FrontDiscLayer layer,float angle,DiscSettings.Style style,DiscSettings.VinylColor color,boolean fitTrimmed,DiscSettings.ReelColor reelColor,CoverCorners corners,float coverRadius)throws Exception{
+  paint(scope,aspect,source,disc,paths,exposure,amount,front,layer,angle,style,color,fitTrimmed,reelColor,corners,coverRadius,liveFinishes);
+ }
+ static void paint(DrawScope scope,float aspect,Source source,Disc disc,Supplier<Path> paths,float exposure,int amount,boolean front,FrontDiscLayer layer,float angle,DiscSettings.Style style,DiscSettings.VinylColor color,boolean fitTrimmed,DiscSettings.ReelColor reelColor,CoverCorners corners,float coverRadius,Finishes finishes)throws Exception{
   exposure=Math.max(0,Math.min(1,exposure));
   long size=(Long)SIZE.invoke(scope);float w=x(size),h=y(size),side=Math.min(h,w/DiscExposure.widthFactor(amount));
   if(side<=0||!Float.isFinite(side))return;
@@ -155,7 +197,7 @@ final class RootRenderer {
   float coverWidth=fittedWidth(side,aspect),coverHeight=fittedHeight(side,aspect);
   float right=fitTrimmed?(side+coverWidth)*.5f:side;
   float discSide=fitTrimmed?Math.min(side,coverHeight):side;
-  float r=discSide*.49f,cy=side*.5f;
+  float r=discRadius(side,aspect,fitTrimmed),cy=side*.5f;
   float travel=discSide*DiscExposure.fraction(amount);
   float cx=DiscExposure.center(side,exposure,amount);
   if(fitTrimmed){
@@ -169,7 +211,7 @@ final class RootRenderer {
     cx=closed+(open-closed)*exposure;
    }else cx=closed+travel*exposure;
   }
-  if(front)cover(scope,aspect,source,side);
+  if(front)cover(scope,source,paths,side,coverWidth,coverHeight,corners,coverRadius);
   Canvas moving=scope.getDrawContext().getCanvas();moving.save();
   try{
    // Front discs stay whole throughout their motion. Only the fixed Canvas
@@ -181,9 +223,21 @@ final class RootRenderer {
    try{
     if(angle!=0f){moving.translate(cx,cy);moving.rotate(angle);moving.translate(-cx,-cy);}
   if(!disc.draw(scope,cx,cy,r*2f)){
-   if(style.reel())reelFace(scope,cx,cy,r,paths,style==DiscSettings.Style.REEL_COVER?source:null,aspect,angle,reelColor);
-   else if(style!=DiscSettings.Style.CD)vinylFace(scope,source,aspect,cx,cy,r,paths,angle,color);
-   else{
+   if(style.reel())reelFace(scope,cx,cy,r,reelFinish(r,paths,reelColor,finishes),style==DiscSettings.Style.REEL_COVER?source:null,aspect,angle,reelColor,disc);
+   else if(style!=DiscSettings.Style.CD)vinylFace(scope,source,aspect,cx,cy,r,paths,angle,color,finishes,disc);
+   else cdFace(scope,source,aspect,cx,cy,r,paths,finishes);
+  }
+   }finally{moving.restore();if(blended)moving.restore();}
+   }
+  }finally{moving.restore();}
+  if(!front)cover(scope,source,paths,side,coverWidth,coverHeight,corners,coverRadius);
+ }
+ static void bakeCd(DrawScope scope,Source source,float aspect,float side,Supplier<Path> paths)throws Exception{
+  // The raster owns a private finish, with the same crop and transparent hub as the live disc.
+  cdFace(scope,source,aspect,side*.5f,side*.5f,side*.5f,paths,new Finishes());
+ }
+ private static void cdFace(DrawScope scope,Source source,float aspect,float cx,float cy,float r,
+     Supplier<Path> paths,Finishes finishes)throws Exception{
    Canvas canvas=scope.getDrawContext().getCanvas();canvas.save();
    try{
     Path outer=paths.get();outer.addOval(new Rect(cx-r,cy-r,cx+r,cy+r),Path.Direction.Clockwise);
@@ -194,26 +248,20 @@ final class RootRenderer {
     float dw=aspect>=1?r*2*aspect:r*2,dh=aspect>=1?r*2:r*2/aspect;
     canvas.save();
     try{if(source.blankDisc())blankFace(scope,r,cx,cy);else{canvas.translate(cx-dw*.5f,cy-dh*.5f);source.draw(scope,dw,dh);}}finally{canvas.restore();}
-    finish(scope,r,pack(cx,cy));
+    finish(scope,r,pack(cx,cy),finishes);
    }finally{canvas.restore();}
    // A faint translucent film keeps the background visible through the hole.
    CIRCLE.invoke(scope,ColorKt.Color(0x18ffffff),r*.125f,pack(cx,cy),1f,Fill.INSTANCE,null,3);
    // Keep the tiny spindle highlight.
    CIRCLE.invoke(scope,ColorKt.Color(0xccffffff),Math.max(.65f,r*.0075f),pack(cx,cy),1f,Fill.INSTANCE,null,3);
-   }
-  }
-   }finally{moving.restore();if(blended)moving.restore();}
-   }
-  }finally{moving.restore();}
-  if(!front)cover(scope,aspect,source,side);
  }
  private static Path oval(Supplier<Path> paths,float radius){
   Path path=paths.get();
   path.addOval(new Rect(-radius,-radius,radius,radius),Path.Direction.Clockwise);
   return path;
  }
- private static VinylFinish vinylFinish(float radius,Supplier<Path> paths,DiscSettings.VinylColor color)throws Exception{
-  VinylFinish finish=cachedVinyl;
+ private static VinylFinish vinylFinish(float radius,Supplier<Path> paths,DiscSettings.VinylColor color,Finishes finishes)throws Exception{
+  VinylFinish finish=finishes.vinyl;
   if(finish!=null&&finish.radius()==radius&&finish.color()==color)return finish;
   boolean colored=color!=DiscSettings.VinylColor.BLACK;
   Path grooves=paths.get();
@@ -261,7 +309,7 @@ final class RootRenderer {
   kotlin.Pair<?,?>[] shading=new kotlin.Pair<?,?>[stops.length];
   for(int i=0;i<stops.length;i++)shading[i]=new kotlin.Pair<>(stops[i],BOX_COLOR.invoke(null,ColorKt.Color(colors[i])));
   Brush falloff=(Brush)RADIAL.invoke(Brush.Companion,shading,pack(0,0),radius,0);
-  return cachedVinyl=new VinylFinish(radius,color,grooves,oval(paths,radius*.375f),oval(paths,radius*.029f),oval(paths,radius*.038f),
+  return finishes.vinyl=new VinylFinish(radius,color,grooves,oval(paths,radius*.375f),oval(paths,radius*.029f),oval(paths,radius*.038f),
       stroke(radius*(colored?.0037f:.0065f)),stroke(radius*.018f),surface,groovesLight,falloff);
  }
  private static kotlin.Pair<?,?>[] vinylStops(DiscSettings.VinylColor color,float[] stops,int[] levels,int alpha,boolean glints)throws Exception{
@@ -272,8 +320,22 @@ final class RootRenderer {
   }
   return values;
  }
- private static void vinylFace(DrawScope scope,Source source,float aspect,float cx,float cy,float radius,Supplier<Path> paths,float angle,DiscSettings.VinylColor color)throws Exception{
-  VinylFinish finish=vinylFinish(radius,paths,color);
+ static void bakeVinylSurface(DrawScope scope,float radius,Supplier<Path> paths,DiscSettings.VinylColor color)throws Exception{
+  Canvas canvas=scope.getDrawContext().getCanvas();canvas.save();
+  try{
+   canvas.translate(radius,radius);
+   paintVinylSurface(scope,radius,vinylFinish(radius,paths,color,new Finishes()));
+  }finally{canvas.restore();}
+ }
+ private static void paintVinylSurface(DrawScope scope,float radius,VinylFinish finish)throws Exception{
+  long center=pack(0,0);
+  BRUSH_CIRCLE.invoke(scope,finish.surface(),radius,center,1f,Fill.INSTANCE,null,3);
+  BRUSH_PATH.invoke(scope,finish.grooves(),finish.groovesLight(),1f,finish.grooveStroke(),null,3);
+  BRUSH_CIRCLE.invoke(scope,finish.falloff(),radius,center,1f,Fill.INSTANCE,null,3);
+ }
+ private static void vinylFace(DrawScope scope,Source source,float aspect,float cx,float cy,float radius,Supplier<Path> paths,
+      float angle,DiscSettings.VinylColor color,Finishes finishes,Disc disc)throws Exception{
+  VinylFinish finish=vinylFinish(radius,paths,color,finishes);
   Canvas canvas=scope.getDrawContext().getCanvas();canvas.save();
   try{
    canvas.translate(cx,cy);
@@ -283,9 +345,7 @@ final class RootRenderer {
    try{
     // The label rotates with the record, while the reflected light stays fixed.
     if(angle!=0f)canvas.rotate(-angle);
-    BRUSH_CIRCLE.invoke(scope,finish.surface(),radius,center,1f,Fill.INSTANCE,null,3);
-    BRUSH_PATH.invoke(scope,finish.grooves(),finish.groovesLight(),1f,finish.grooveStroke(),null,3);
-    BRUSH_CIRCLE.invoke(scope,finish.falloff(),radius,center,1f,Fill.INSTANCE,null,3);
+    if(!disc.drawVinylSurface(scope,radius))paintVinylSurface(scope,radius,finish);
    }finally{canvas.restore();}
    boolean classic=color==DiscSettings.VinylColor.BLACK;
    int rimColor=classic?color.shade(54):0xa0000000|(color.shade(70)&0xffffff);
@@ -314,12 +374,11 @@ final class RootRenderer {
       Brush windowSoftShadow,Brush windowContactShadow,Brush windowHighlight,ReelMark mark,
       Stroke flange,Stroke flangeSeam,Brush flangeMetal,Brush flangeBevel,Brush hubBevel,Brush hubRecess,Brush spindleBevel,
       Brush solidFace,Brush solidTrim,Brush glassBevel,Stroke collarBevel,Stroke reflectionWidth){}
- private static volatile ReelFinish cachedReel;
- private static ReelFinish reelFinish(float radius,Supplier<Path> paths,DiscSettings.ReelColor color)throws Exception{
-  ReelFinish finish=cachedReel;
+ private static ReelFinish reelFinish(float radius,Supplier<Path> paths,DiscSettings.ReelColor color,Finishes finishes)throws Exception{
+  ReelFinish finish=finishes.reel;
   if(finish!=null&&finish.radius()==radius&&finish.color()==color)return finish;
   finish=buildReelFinish(radius,paths,color);
-  cachedReel=finish;
+  finishes.reel=finish;
   return finish;
  }
  private static ReelFinish buildReelFinish(float radius,Supplier<Path> paths,DiscSettings.ReelColor color)throws Exception{
@@ -505,103 +564,145 @@ final class RootRenderer {
    stops[i]=new kotlin.Pair<>(offsets[i],BOX_COLOR.invoke(null,ColorKt.Color(colors[i])));
   return stops;
  }
- private static void reelFace(DrawScope scope,float cx,float cy,float radius,Supplier<Path> paths,Source artwork,float aspect,float angle,DiscSettings.ReelColor color)throws Exception{
-  reelFace(scope,cx,cy,radius,reelFinish(radius,paths,color),artwork,aspect,angle,color);
- }
- static void bakeSolidReel(DrawScope scope,float radius,Supplier<Path> paths,DiscSettings.ReelColor color)throws Exception{
-  // Shader brushes retain per-canvas state. A worker owns a fresh finish.
+ static void bakeSolidReel(DrawScope fixed,DrawScope rotating,float radius,Supplier<Path> paths,
+     DiscSettings.ReelColor color)throws Exception{
   var finish=buildReelFinish(radius,paths,color);
-  reelFace(scope,radius,radius,radius,finish,null,1,0,color);
- }
- private static void reelFace(DrawScope scope,float cx,float cy,float radius,ReelFinish reel,Source artwork,float aspect,float angle,DiscSettings.ReelColor color)throws Exception{
-  Canvas canvas=scope.getDrawContext().getCanvas();canvas.save();
-  long center=pack(0,0);
+  var base=fixed.getDrawContext().getCanvas();
+  base.save();
   try{
-   canvas.translate(cx,cy);
-   CLIP.invoke(canvas,reel.outer(),1);
-   CLIP.invoke(canvas,reel.spindle(),0);
+   base.translate(radius,radius);
+   clipReel(base,finish);
+   paintSolidReelSurface(fixed,base,radius,finish,0);
+   paintReelMetal(fixed,base,radius,finish,0,true);
+  }finally{base.restore();}
+  var overlay=rotating.getDrawContext().getCanvas();
+  overlay.save();
+  try{
+   overlay.translate(radius,radius);
+   clipReel(overlay,finish);
+   // The windows never intersect the outer rim or the center collar.
+   paintReelWindows(rotating,overlay,radius,finish,null);
+   paintReelFaceMark(rotating,overlay,radius,finish,color);
+   paintReelHubMark(rotating,overlay,radius,finish,true);
+  }finally{overlay.restore();}
+ }
+ static void bakeReelTape(DrawScope scope,float radius,Supplier<Path> paths)throws Exception{
+  var finish=buildReelFinish(radius,paths,DiscSettings.ReelColor.DEFAULT);
+  Canvas canvas=scope.getDrawContext().getCanvas();canvas.save();
+  try{
+   canvas.translate(radius,radius);
+   paintReelTape(scope,pack(0,0),radius,finish);
+  }finally{canvas.restore();}
+ }
+ private static void paintReelTape(DrawScope scope,long center,float radius,ReelFinish reel)throws Exception{
+  BRUSH_CIRCLE.invoke(scope,reel.tape(),radius,center,1f,Fill.INSTANCE,null,3);
+  BRUSH_PATH.invoke(scope,reel.tapeGrooves(),reel.tapeGrooveInk(),1f,reel.tapeLine(),null,3);
+  BRUSH_PATH.invoke(scope,reel.tapeEdges(),reel.tapeEdgeInk(),1f,reel.tapeLine(),null,3);
+  BRUSH_CIRCLE.invoke(scope,reel.tapeSheen(),radius,center,1f,Fill.INSTANCE,null,3);
+ }
+ private static void clipReel(Canvas canvas,ReelFinish reel)throws Exception{
+  CLIP.invoke(canvas,reel.outer(),1);
+  CLIP.invoke(canvas,reel.spindle(),0);
+ }
+ private static void paintReelWindows(DrawScope scope,Canvas canvas,float radius,ReelFinish reel,Disc disc)throws Exception{
+  canvas.save();
+  try{
+   CLIP.invoke(canvas,reel.windows(),1);
+   if(disc==null||!disc.drawReelTape(scope,radius))paintReelTape(scope,pack(0,0),radius,reel);
+   // The clip keeps the shaded lip inside the windows, clear of the cover artwork.
+   BRUSH_PATH.invoke(scope,reel.windows(),reel.windowShade(),1f,reel.windowLip(),null,3);
+   // Offset the strokes in opposite directions, inside the cutout, to reveal its recessed wall.
    canvas.save();
    try{
-    CLIP.invoke(canvas,reel.windows(),1);
-    BRUSH_CIRCLE.invoke(scope,reel.tape(),radius,center,1f,Fill.INSTANCE,null,3);
-    BRUSH_PATH.invoke(scope,reel.tapeGrooves(),reel.tapeGrooveInk(),1f,reel.tapeLine(),null,3);
-    BRUSH_PATH.invoke(scope,reel.tapeEdges(),reel.tapeEdgeInk(),1f,reel.tapeLine(),null,3);
-    BRUSH_CIRCLE.invoke(scope,reel.tapeSheen(),radius,center,1f,Fill.INSTANCE,null,3);
-    // The clip keeps the shaded lip inside the windows, clear of the cover artwork.
-    BRUSH_PATH.invoke(scope,reel.windows(),reel.windowShade(),1f,reel.windowLip(),null,3);
-    // Offset the strokes in opposite directions, inside the cutout, to reveal its recessed wall.
-    canvas.save();
-    try{
-     canvas.translate(radius*.007f,radius*.021f);
-     BRUSH_PATH.invoke(scope,reel.windows(),reel.windowSoftShadow(),1f,reel.windowLip(),null,3);
-     canvas.translate(-radius*.004f,-radius*.009f);
-     BRUSH_PATH.invoke(scope,reel.windows(),reel.windowContactShadow(),1f,reel.rim(),null,3);
-     canvas.translate(-radius*.006f,-radius*.018f);
-     BRUSH_PATH.invoke(scope,reel.windows(),reel.windowHighlight(),1f,reel.rim(),null,3);
-    }finally{canvas.restore();}
+    canvas.translate(radius*.007f,radius*.021f);
+    BRUSH_PATH.invoke(scope,reel.windows(),reel.windowSoftShadow(),1f,reel.windowLip(),null,3);
+    canvas.translate(-radius*.004f,-radius*.009f);
+    BRUSH_PATH.invoke(scope,reel.windows(),reel.windowContactShadow(),1f,reel.rim(),null,3);
+    canvas.translate(-radius*.006f,-radius*.018f);
+    BRUSH_PATH.invoke(scope,reel.windows(),reel.windowHighlight(),1f,reel.rim(),null,3);
    }finally{canvas.restore();}
+  }finally{canvas.restore();}
+ }
+ private static void paintSolidReelSurface(DrawScope scope,Canvas canvas,float radius,ReelFinish reel,float angle)throws Exception{
+  canvas.save();
+  try{
+   if(angle!=0f)canvas.rotate(-angle);
+   BRUSH_CIRCLE.invoke(scope,reel.solidFace(),radius,pack(0,0),1f,Fill.INSTANCE,null,3);
+  }finally{canvas.restore();}
+ }
+ private static void paintReelFaceMark(DrawScope scope,Canvas canvas,float radius,ReelFinish reel,
+     DiscSettings.ReelColor color)throws Exception{
+  float markX=radius*.008f,markY=-radius*.52f,markScale=radius*.040f;
+  boolean lightFace=color!=DiscSettings.ReelColor.GRAPHITE&&color!=DiscSettings.ReelColor.WINE;
+  if(!ReelWordmark.drawFace(scope,markX,markY,markScale*11.1f,lightFace))
+   printReelMark(scope,canvas,reel.mark(),markX,markY,markScale,lightFace);
+ }
+ private static void paintReelMetal(DrawScope scope,Canvas canvas,float radius,ReelFinish reel,float angle,boolean solid)throws Exception{
+  long center=pack(0,0);
+  // Paint the dark inner seam beneath the flange on both reel styles.
+  circle(scope,0xff292722,radius*.980f,center,reel.flangeSeam());
+  canvas.save();
+  try{
+   if(angle!=0f)canvas.rotate(-angle);
+   BRUSH_CIRCLE.invoke(scope,reel.flangeMetal(),radius*.984f,center,1f,reel.flange(),null,3);
+   BRUSH_CIRCLE.invoke(scope,reel.flangeBevel(),radius*.994f,center,1f,reel.tapeLine(),null,3);
+  }finally{canvas.restore();}
+  canvas.save();
+  try{
+   // Keep the lighting fixed while the artwork, windows and inscriptions turn.
+   if(angle!=0f)canvas.rotate(-angle);
+   if(solid){
+    circle(scope,0x64100d0d,radius*.355f,pack(0,radius*.009f),Fill.INSTANCE);
+    BRUSH_CIRCLE.invoke(scope,reel.solidTrim(),radius*.345f,center,1f,Fill.INSTANCE,null,3);
+    circle(scope,0xff232326,radius*.317f,center,Fill.INSTANCE);
+   }else{
+    BRUSH_CIRCLE.invoke(scope,reel.hubGlass(),radius*.338f,center,1f,Fill.INSTANCE,null,3);
+    BRUSH_CIRCLE.invoke(scope,reel.glassReflection(),radius*.298f,center,1f,reel.reflectionWidth(),null,3);
+    BRUSH_CIRCLE.invoke(scope,reel.glassBevel(),radius*.328f,center,1f,reel.collarBevel(),null,3);
+    BRUSH_CIRCLE.invoke(scope,reel.glassInnerEdge(),radius*.316f,center,1f,reel.tapeLine(),null,3);
+    circle(scope,0x856d431e,radius*.340f,center,reel.tapeLine());
+    // A small contact shadow separates the raised collar from the transparent glass.
+    circle(scope,0x36101317,radius*.205f,pack(radius*.005f,radius*.010f),Fill.INSTANCE);
+    circle(scope,0xff22262a,radius*.199f,center,Fill.INSTANCE);
+    BRUSH_CIRCLE.invoke(scope,reel.hubBevel(),radius*.193f,center,1f,Fill.INSTANCE,null,3);
+    BRUSH_CIRCLE.invoke(scope,reel.hubRecess(),radius*.176f,center,1f,Fill.INSTANCE,null,3);
+    circle(scope,0xff111316,radius*.098f,center,Fill.INSTANCE);
+    BRUSH_CIRCLE.invoke(scope,reel.spindleBevel(),radius*.091f,center,1f,Fill.INSTANCE,null,3);
+    circle(scope,0xff101215,radius*.077f,center,Fill.INSTANCE);
+   }
+  }finally{canvas.restore();}
+ }
+ private static void paintReelHubMark(DrawScope scope,Canvas canvas,float radius,ReelFinish reel,boolean solid)throws Exception{
+  if(!ReelWordmark.drawHub(scope,solid?radius*1.74f:radius))
+   printReelMark(scope,canvas,reel.mark(),radius*.015f,radius*.125f,radius*.013f,false);
+ }
+ private static void reelFace(DrawScope scope,float cx,float cy,float radius,ReelFinish reel,Source artwork,float aspect,
+     float angle,DiscSettings.ReelColor color,Disc disc)throws Exception{
+  Canvas canvas=scope.getDrawContext().getCanvas();canvas.save();
+  try{
+   canvas.translate(cx,cy);
+   clipReel(canvas,reel);
+   paintReelWindows(scope,canvas,radius,reel,disc);
    canvas.save();
    try{
     CLIP.invoke(canvas,reel.windows(),0);
-    if(artwork!=null)CLIP.invoke(canvas,reel.artworkFace(),1);
     if(artwork==null){
-     canvas.save();
-     try{
-      if(angle!=0f)canvas.rotate(-angle);
-      BRUSH_CIRCLE.invoke(scope,reel.solidFace(),radius,center,1f,Fill.INSTANCE,null,3);
-     }finally{canvas.restore();}
-    }else circle(scope,0xffff4208,radius,center,Fill.INSTANCE);
-    if(artwork!=null&&!artwork.blankDisc()){
-     canvas.save();
-     try{
+     paintSolidReelSurface(scope,canvas,radius,reel,angle);
+     paintReelFaceMark(scope,canvas,radius,reel,color);
+    }else{
+     CLIP.invoke(canvas,reel.artworkFace(),1);
+     circle(scope,0xffff4208,radius,pack(0,0),Fill.INSTANCE);
+     if(!artwork.blankDisc()){
       float diameter=radius*2;
       float width=diameter*Math.max(1f,aspect),height=diameter*Math.max(1f,1f/aspect);
       canvas.translate(-width*.5f,-height*.5f);
       artwork.draw(scope,width,height);
-     }finally{canvas.restore();}
+     }
     }
-    if(artwork==null){
-     float markX=radius*.008f,markY=-radius*.52f,markScale=radius*.040f;
-     boolean lightFace=color!=DiscSettings.ReelColor.GRAPHITE&&color!=DiscSettings.ReelColor.WINE;
-     if(!ReelWordmark.drawFace(scope,markX,markY,markScale*11.1f,lightFace))
-      printReelMark(scope,canvas,reel.mark(),markX,markY,markScale,lightFace);
-    }
-   }finally{canvas.restore();}
-   // Paint the dark inner seam beneath the flange on both reel styles.
-   circle(scope,0xff292722,radius*.980f,center,reel.flangeSeam());
-   canvas.save();
-   try{
-    if(angle!=0f)canvas.rotate(-angle);
-    BRUSH_CIRCLE.invoke(scope,reel.flangeMetal(),radius*.984f,center,1f,reel.flange(),null,3);
-    BRUSH_CIRCLE.invoke(scope,reel.flangeBevel(),radius*.994f,center,1f,reel.tapeLine(),null,3);
    }finally{canvas.restore();}
    boolean solid=artwork==null;
-   canvas.save();
-   try{
-    // Keep the lighting fixed while the artwork, windows and inscriptions turn.
-    if(angle!=0f)canvas.rotate(-angle);
-    if(solid){
-     circle(scope,0x64100d0d,radius*.355f,pack(0,radius*.009f),Fill.INSTANCE);
-     BRUSH_CIRCLE.invoke(scope,reel.solidTrim(),radius*.345f,center,1f,Fill.INSTANCE,null,3);
-     circle(scope,0xff232326,radius*.317f,center,Fill.INSTANCE);
-    }else{
-     BRUSH_CIRCLE.invoke(scope,reel.hubGlass(),radius*.338f,center,1f,Fill.INSTANCE,null,3);
-     BRUSH_CIRCLE.invoke(scope,reel.glassReflection(),radius*.298f,center,1f,reel.reflectionWidth(),null,3);
-     BRUSH_CIRCLE.invoke(scope,reel.glassBevel(),radius*.328f,center,1f,reel.collarBevel(),null,3);
-     BRUSH_CIRCLE.invoke(scope,reel.glassInnerEdge(),radius*.316f,center,1f,reel.tapeLine(),null,3);
-     circle(scope,0x856d431e,radius*.340f,center,reel.tapeLine());
-     // A small contact shadow separates the raised collar from the transparent glass.
-     circle(scope,0x36101317,radius*.205f,pack(radius*.005f,radius*.010f),Fill.INSTANCE);
-     circle(scope,0xff22262a,radius*.199f,center,Fill.INSTANCE);
-     BRUSH_CIRCLE.invoke(scope,reel.hubBevel(),radius*.193f,center,1f,Fill.INSTANCE,null,3);
-     BRUSH_CIRCLE.invoke(scope,reel.hubRecess(),radius*.176f,center,1f,Fill.INSTANCE,null,3);
-     circle(scope,0xff111316,radius*.098f,center,Fill.INSTANCE);
-     BRUSH_CIRCLE.invoke(scope,reel.spindleBevel(),radius*.091f,center,1f,Fill.INSTANCE,null,3);
-     circle(scope,0xff101215,radius*.077f,center,Fill.INSTANCE);
-    }
-   }finally{canvas.restore();}
-   if(!ReelWordmark.drawHub(scope,solid?radius*1.74f:radius))
-    printReelMark(scope,canvas,reel.mark(),radius*.015f,radius*.125f,radius*.013f,false);
+   paintReelMetal(scope,canvas,radius,reel,angle,solid);
+   paintReelHubMark(scope,canvas,radius,reel,solid);
   }finally{canvas.restore();}
  }
  private static void blankFace(DrawScope scope,float r,float cx,float cy)throws Exception{
@@ -634,16 +735,16 @@ final class RootRenderer {
   for(int i=0;i<stops.length;i++)values[i]=new kotlin.Pair<>(stops[i],BOX_COLOR.invoke(null,ColorKt.Color(colors[i])));
   return (Brush)LINEAR.invoke(Brush.Companion,values,pack(-r*.10f,-r*.10f),pack(r*.10f,r*.10f),0);
  }
- private static Finish discFinish(float r)throws Exception{
-  Finish style=cachedFinish;
+ private static Finish discFinish(float r,Finishes finishes)throws Exception{
+  Finish style=finishes.cd;
   if(style==null||style.radius()!=r){
    float line=Math.max(.6f,Math.min(1.2f,r*.004f));
-   cachedFinish=style=new Finish(r,stroke(line),stroke(Math.max(1.2f,Math.min(5f,r*.018f))),hub(r),metal(r),innerLip(r),stroke(r*.005f),stroke(r*.012f));
+   finishes.cd=style=new Finish(r,stroke(line),stroke(Math.max(1.2f,Math.min(5f,r*.018f))),hub(r),metal(r),innerLip(r),stroke(r*.005f),stroke(r*.012f));
   }
   return style;
  }
- private static void finish(DrawScope scope,float r,long center)throws Exception{
-  Finish style=discFinish(r);
+ private static void finish(DrawScope scope,float r,long center,Finishes finishes)throws Exception{
+  Finish style=discFinish(r,finishes);
   float line=style.line().getWidth();
   // White optical edge sits wholly inside the original disc silhouette.
   float edge=style.edge().getWidth();
@@ -667,11 +768,16 @@ final class RootRenderer {
  private static void circle(DrawScope scope,int color,float radius,long center,DrawStyle style)throws Exception{
   CIRCLE.invoke(scope,ColorKt.Color(color),radius,center,1f,style,null,3);
  }
- private static void cover(DrawScope scope,float aspect,Source source,float side)throws Exception{
-  // Complete source fitted proportionally into its own square, drawn over CD.
-  float cw=fittedWidth(side,aspect),ch=fittedHeight(side,aspect);
+ private static void cover(DrawScope scope,Source source,Supplier<Path> paths,float side,float width,float height,
+     CoverCorners corners,float radius)throws Exception{
+  // Fit the complete sleeve and clip only its visible artwork. Copies of
+  // the artwork used to generate the disc keep their original pixels.
   Canvas canvas=scope.getDrawContext().getCanvas();canvas.save();
-  try{canvas.translate((side-cw)*.5f,(side-ch)*.5f);source.draw(scope,cw,ch);}finally{canvas.restore();}
+  try{
+   canvas.translate((side-width)*.5f,(side-height)*.5f);
+   if(corners!=null&&radius>0)CLIP.invoke(canvas,corners.outline(paths,width,height,radius),1);
+   source.draw(scope,width,height);
+  }finally{canvas.restore();}
  }
  static long pack(float x,float y){return ((long)Float.floatToRawIntBits(x)<<32)|(Float.floatToRawIntBits(y)&0xffffffffL);}
  static float x(long p){return Float.intBitsToFloat((int)(p>>>32));}

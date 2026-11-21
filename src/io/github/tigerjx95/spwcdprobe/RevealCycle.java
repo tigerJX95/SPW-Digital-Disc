@@ -3,6 +3,7 @@ package io.github.tigerjx95.spwcdprobe;
 final class RevealCycle {
  enum Edge { NONE, HIDDEN, SHOWN }
  private boolean initialized,visible;
+ boolean visible(){return visible;}
  Edge sample(boolean settledVisible){
   if(initialized&&visible==settledVisible)return Edge.NONE;
   initialized=true;visible=settledVisible;

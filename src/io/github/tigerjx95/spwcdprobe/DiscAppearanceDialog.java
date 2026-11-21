@@ -17,14 +17,17 @@ public final class DiscAppearanceDialog implements AutoCloseable {
  private final DiscSettings settings;
  private final Supplier<DiscSettings.AlbumKey> playingAlbum;
  private final Supplier<DiscSettings.ArtworkSource> artworkSource;
+ private final Consumer<DiscSettings.Appearance> prepareDefault;
  private JDialog window;
  private boolean saving;
  private DiscSettings.AlbumKey windowAlbum;
 
- DiscAppearanceDialog(DiscSettings settings,Supplier<DiscSettings.AlbumKey> playingAlbum,Supplier<DiscSettings.ArtworkSource> artworkSource){
+ DiscAppearanceDialog(DiscSettings settings,Supplier<DiscSettings.AlbumKey> playingAlbum,Supplier<DiscSettings.ArtworkSource> artworkSource,
+     Consumer<DiscSettings.Appearance> prepareDefault){
   this.settings=settings;
   this.playingAlbum=playingAlbum;
   this.artworkSource=artworkSource;
+  this.prepareDefault=prepareDefault;
   active=this;
  }
 
@@ -65,11 +68,16 @@ public final class DiscAppearanceDialog implements AutoCloseable {
    @Override public void windowClosed(WindowEvent event){if(window==dialog)window=null;}
   });
   dialog.setContentPane(albumScope?albumContent(dialog,album):
-      content(settings.appearance(),value->saveInBackground(dialog,()->settings.saveAppearance(value),"无法保存盘面样式。"),
+      content(settings.appearance(),value->saveInBackground(dialog,()->saveDefault(value),"无法保存盘面样式。"),
           ()->{if(!saving)dialog.dispose();},"默认盘面样式",null,null,null));
   dialog.pack();
   dialog.setLocationRelativeTo(owner);
   dialog.setVisible(true);
+ }
+
+ boolean saveDefault(DiscSettings.Appearance appearance){
+  if(!appearance.equals(settings.appearance()))prepareDefault.accept(appearance);
+  return settings.saveAppearance(appearance);
  }
 
  private JComponent albumContent(JDialog dialog,DiscSettings.AlbumKey album){

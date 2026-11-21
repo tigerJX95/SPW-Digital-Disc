@@ -60,6 +60,33 @@ public class GeneratedDiscFinishTest {
    RootRenderer.paint(local.scope,1,local::source,(s,x,y,d)->true,local::path,1,100,front,FrontRendererTest.layer(),angle);
    check(local.circles==0,"local PNG/JPG bypasses all generated finishing");
   }
+  checkPreparedArtwork();
   System.out.println("PASS generated finish: "+cases+" size/color/layer/rotation cases, unchanged artwork body and cover, translucent hole, white spindle, bounded rim, translucent annulus and untouched local artwork");
  }
+ private static void checkPreparedArtwork()throws Exception{
+  int side=400,radius=196,diameter=radius*2,cx=600,cy=200;
+  for(float aspect:new float[]{.8f,1f,1.5f}){
+   var live=new RootRasterTest.Raster(side*2,side);
+   var prepared=new RootRasterTest.Raster(diameter,diameter);
+   RootRenderer.paint(live.scope,aspect,(scope,w,h)->paintSwatches(live,w,h),(s,x,y,d)->false,
+       live::path,1,100,false,null,0,DiscSettings.Style.CD,DiscSettings.VinylColor.BLUE,false);
+   RootRenderer.bakeCd(prepared.scope,(scope,w,h)->paintSwatches(prepared,w,h),aspect,diameter,prepared::path);
+   for(int y=8;y<diameter-8;y+=3)for(int x=8;x<diameter-8;x+=3){
+    check(prepared.bitmap.getRGB(x,y)==live.bitmap.getRGB(cx-radius+x,cy-radius+y),
+        "prepared CD matches live crop, translucent center and finish: "+aspect+" at "+x+","+y);
+   }
+   check((prepared.bitmap.getRGB(0,0)>>>24)==0,"prepared CD corners stay transparent");
+   check((prepared.bitmap.getRGB(radius+15,radius)>>>24)==24,"prepared center keeps the transparent film");
+  }
+  check(GeneratedCdRaster.Key.of(null,null,1f,400)==null,"missing cover retains the live fallback");
+  System.out.println("PASS prepared CD reproduces live CD artwork, spindle and transparency");
+ }
+
+ private static void paintSwatches(RootRasterTest.Raster raster,float width,float height){
+  raster.graphics.setColor(new Color(0xff315d90,true));
+  raster.graphics.fill(new Rectangle2D.Float(0,0,width,height));
+  raster.graphics.setColor(new Color(0xffcf8c57,true));
+  raster.graphics.fill(new Rectangle2D.Float(width*.33f,height*.55f,width*.2f,height*.2f));
+ }
+
 }

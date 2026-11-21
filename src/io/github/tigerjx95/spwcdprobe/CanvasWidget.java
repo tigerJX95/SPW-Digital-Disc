@@ -3,12 +3,14 @@ import androidx.compose.ui.Modifier;
 import androidx.compose.foundation.layout.*;
 import androidx.compose.foundation.ClickableKt;
 import androidx.compose.ui.graphics.GraphicsLayerModifierKt;
+import androidx.compose.ui.graphics.GraphicsLayerScope;
 import androidx.compose.ui.layout.LayoutCoordinates;
 import androidx.compose.ui.node.NodeCoordinator;
 import androidx.compose.ui.unit.*;
 import java.lang.reflect.Method;
 import kotlin.Unit;
 import kotlin.jvm.functions.Function0;
+import kotlin.jvm.functions.Function1;
 /** Our sibling Canvas has real width/height and its own matching click rectangle. */
 final class CanvasWidget {
  private static final Method SIZE,BOX,CLICK;
@@ -20,15 +22,19 @@ final class CanvasWidget {
   }catch(Exception e){throw new ExceptionInInitializerError(e);}
  }
  static Modifier modifier(SelfDrawLayout plan,float density,Function0<Unit> click)throws Exception{
+  return modifier(plan,density,click,layer->Unit.INSTANCE);
+ }
+ static Modifier modifier(SelfDrawLayout plan,float density,Function0<Unit> click,
+     Function1<GraphicsLayerScope,Unit> layerTransform)throws Exception{
   Modifier offset=OffsetKt.absoluteOffset(Modifier.Companion,(Density d)->{
    try{return (IntOffset)BOX.invoke(null,((long)Math.round(plan.left())<<32)|(Math.round(plan.top())&0xffffffffL));}
    catch(Exception e){throw new IllegalStateException(e);}
   });
   Modifier sized=(Modifier)SIZE.invoke(null,offset,plan.width()/density,plan.height()/density);
-  Modifier clickable=(Modifier)CLICK.invoke(null,sized,null,null,true,null,null,click);
-  // Give the Canvas its own recording layer so animation invalidations
-  // don't fall through to the enclosing player layer. Keep its full bounds.
-  return GraphicsLayerModifierKt.graphicsLayer(clickable,layer->Unit.INSTANCE);
+  // Keep hit testing inside the transformed recording layer so the click target
+  // moves with the cover and the disc.
+  Modifier layer=GraphicsLayerModifierKt.graphicsLayer(sized,layerTransform);
+  return (Modifier)CLICK.invoke(null,layer,null,null,true,null,null,click);
  }
  static boolean hasDrawingLayer(LayoutCoordinates coordinates){
   return coordinates instanceof NodeCoordinator coordinator&&coordinator.isAttached()

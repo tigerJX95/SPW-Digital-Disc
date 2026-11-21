@@ -81,6 +81,62 @@ public class VinylRendererTest {
    custom.graphics.fill(new Rectangle2D.Float(x-10,y-10,20,20));return true;
   },custom::path,1,100,false,null,0,true,DiscSettings.VinylColor.BLUE);
   check(custom.sourceCalls==1&&custom.bitmap.getRGB(600,200)==Color.MAGENTA.getRGB(),"custom artwork takes priority");
+  comparePreparedSurface();
   System.out.println("PASS vinyl label crop, dark outer grooves, spindle transparency, restored Canvas and custom priority");
  }
+ private static void comparePreparedSurface()throws Exception{
+  int side=400,radius=196;
+  for(var color:new DiscSettings.VinylColor[]{DiscSettings.VinylColor.BLACK,DiscSettings.VinylColor.PINK}){
+   var surface=new RootRasterTest.Raster(side*2,side);
+   // Match the live pixel origin for the Java2D sweep wedge rasterizer.
+   surface.graphics.translate(600-radius,200-radius);
+   RootRenderer.bakeVinylSurface(surface.scope,radius,surface::path,color);
+   for(float angle:new float[]{0,90}){
+    var live=new RootRasterTest.Raster(side*2,side);
+    var cached=new RootRasterTest.Raster(side*2,side);
+    var style=color==DiscSettings.VinylColor.BLACK?DiscSettings.Style.BLACK_VINYL:DiscSettings.Style.COLORED_VINYL;
+    RootRenderer.Disc prepared=new RootRenderer.Disc(){
+     public boolean draw(androidx.compose.ui.graphics.drawscope.DrawScope scope,float x,float y,float diameter){return false;}
+     public boolean drawVinylSurface(androidx.compose.ui.graphics.drawscope.DrawScope scope,float r){
+      check(r==radius,"prepared surface keeps the measured vinyl radius");
+      cached.graphics.drawImage(surface.bitmap,null,-600,-200);
+      return true;
+     }
+    };
+    RootRenderer.paint(live.scope,1,live::source,(s,x,y,d)->false,live::path,1,100,false,null,angle,
+        style,color,false,DiscSettings.ReelColor.DEFAULT,null,0,new RootRenderer.Finishes());
+    RootRenderer.paint(cached.scope,1,cached::source,prepared,cached::path,1,100,false,null,angle,
+        style,color,false,DiscSettings.ReelColor.DEFAULT,null,0,new RootRenderer.Finishes());
+    check(live.pathDraws==1&&cached.pathDraws==0,"prepared vinyl draws no live groove paths");
+    check(cached.bitmap.getRGB(600,200)==0,"cached surface preserves the transparent spindle");
+    check(cached.sourceCalls==2,"the sleeve and rotating label are still drawn from the cover");
+    int totalError=0,samples=0;
+    for(int y=20;y<380;y+=9)for(int x=420;x<780;x+=9){
+     if(Math.hypot(x-600,y-200)>radius-6)continue;
+     var existing=new Color(live.bitmap.getRGB(x,y),true);
+     var preparedPixel=new Color(cached.bitmap.getRGB(x,y),true);
+     int a=existing.getAlpha(),b=preparedPixel.getAlpha();
+     int error=Math.max(Math.abs(a-b),
+         Math.max(Math.abs(a*existing.getRed()-b*preparedPixel.getRed()),
+             Math.max(Math.abs(a*existing.getGreen()-b*preparedPixel.getGreen()),
+                 Math.abs(a*existing.getBlue()-b*preparedPixel.getBlue())))/255);
+     totalError+=error;
+     samples++;
+    }
+    // The adapter approximates sweep shaders with aliased wedge and groove paths.
+    // Compare premultiplied colors, then check the label and hole exactly.
+    check(totalError<5*samples,"cached shading agrees with live vinyl for "+color+" at "+angle+
+        " (mean channel error "+(float)totalError/samples+")");
+    for(int[] point:new int[][]{{565,165},{635,165},{565,235},{635,235},{600,200}}){
+     check(live.bitmap.getRGB(point[0],point[1])==cached.bitmap.getRGB(point[0],point[1]),
+         "rotation and resampling leave the label pixels and center hole intact");
+    }
+    int flank=cached.bitmap.getRGB(600+135,200),upper=cached.bitmap.getRGB(600,200-135);
+    if(color==DiscSettings.VinylColor.BLACK)check((upper&255)>(flank&255)+25,"black vinyl retains fixed highlights");
+    else check((flank>>>24)>85&&(flank>>>24)<115,"colored vinyl retains translucency");
+   }
+  }
+  System.out.println("PASS prepared vinyl preserves translucency, fixed highlights and label rotation");
+ }
+
 }
