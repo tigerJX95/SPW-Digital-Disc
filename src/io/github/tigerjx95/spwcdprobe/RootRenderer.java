@@ -16,7 +16,10 @@ final class RootRenderer {
  interface Source {
   void draw(DrawScope scope,float width,float height)throws Exception;
   default boolean blankDisc(){return false;}
+  default FramedArtwork vinylLabel(){return null;}
+  default FramedArtwork discArtwork(){return null;}
  }
+ record FramedArtwork(Source image,float aspect,VinylLabelFraming framing){}
  interface Disc {
   boolean draw(DrawScope scope,float cx,float cy,float diameter)throws Exception;
   default boolean drawReelTape(DrawScope scope,float radius){return false;}
@@ -36,6 +39,8 @@ final class RootRenderer {
    return path;
   }
  }
+ static final float CD_HOLE_RATIO=.125f;
+ static final int CD_FACE_COLOR=0xffdce0e3, REEL_FIT_COLOR=0xff30383e, BLACK_LABEL_COLOR=0xff252525;
  private static final Method CLIP,CLIP_RECT,CIRCLE,BRUSH_CIRCLE,RADIAL,LINEAR,BOX_COLOR,SIZE,INTRINSIC,DRAW;
  private static final Constructor<Stroke> STROKE;
  private record Finish(float radius,Stroke line,Stroke edge,Brush hub,Brush metal,Brush innerLip,Stroke bevel,Stroke lip){}
@@ -225,7 +230,7 @@ final class RootRenderer {
   if(!disc.draw(scope,cx,cy,r*2f)){
    if(style.reel())reelFace(scope,cx,cy,r,reelFinish(r,paths,reelColor,finishes),style==DiscSettings.Style.REEL_COVER?source:null,aspect,angle,reelColor,disc);
    else if(style!=DiscSettings.Style.CD)vinylFace(scope,source,aspect,cx,cy,r,paths,angle,color,finishes,disc);
-   else cdFace(scope,source,aspect,cx,cy,r,paths,finishes);
+   else cdFace(scope,source,source.discArtwork(),aspect,cx,cy,r,paths,finishes);
   }
    }finally{moving.restore();if(blended)moving.restore();}
    }
@@ -234,26 +239,32 @@ final class RootRenderer {
  }
  static void bakeCd(DrawScope scope,Source source,float aspect,float side,Supplier<Path> paths)throws Exception{
   // The raster owns a private finish, with the same crop and transparent hub as the live disc.
-  cdFace(scope,source,aspect,side*.5f,side*.5f,side*.5f,paths,new Finishes());
+  cdFace(scope,source,source.discArtwork(),aspect,side*.5f,side*.5f,side*.5f,paths,new Finishes());
  }
- private static void cdFace(DrawScope scope,Source source,float aspect,float cx,float cy,float r,
+ private static void cdFace(DrawScope scope,Source source,FramedArtwork artwork,float aspect,float cx,float cy,float r,
      Supplier<Path> paths,Finishes finishes)throws Exception{
    Canvas canvas=scope.getDrawContext().getCanvas();canvas.save();
    try{
     Path outer=paths.get();outer.addOval(new Rect(cx-r,cy-r,cx+r,cy+r),Path.Direction.Clockwise);
-    Path hole=paths.get();float hr=r*.125f;hole.addOval(new Rect(cx-hr,cy-hr,cx+hr,cy+hr),Path.Direction.Clockwise);
-    CLIP.invoke(canvas,outer,1); // Intersect with outer circle.
-    CLIP.invoke(canvas,hole,0);  // Difference: genuine transparent center hole.
-    // Fill the circle without stretching; crop only this secondary copy.
-    float dw=aspect>=1?r*2*aspect:r*2,dh=aspect>=1?r*2:r*2/aspect;
+    Path hole=paths.get();float hr=r*CD_HOLE_RATIO;hole.addOval(new Rect(cx-hr,cy-hr,cx+hr,cy+hr),Path.Direction.Clockwise);
+    CLIP.invoke(canvas,outer,1);
+    CLIP.invoke(canvas,hole,0);
     canvas.save();
-    try{if(source.blankDisc())blankFace(scope,r,cx,cy);else{canvas.translate(cx-dw*.5f,cy-dh*.5f);source.draw(scope,dw,dh);}}finally{canvas.restore();}
+    try{
+     if(source.blankDisc()||artwork!=null&&artwork.framing().fit())blankFace(scope,r,cx,cy);
+     if(!source.blankDisc())drawDiscArtwork(scope,source,artwork,aspect,cx,cy,r*2);
+    }finally{canvas.restore();}
     finish(scope,r,pack(cx,cy),finishes);
    }finally{canvas.restore();}
    // A faint translucent film keeps the background visible through the hole.
-   CIRCLE.invoke(scope,ColorKt.Color(0x18ffffff),r*.125f,pack(cx,cy),1f,Fill.INSTANCE,null,3);
-   // Keep the tiny spindle highlight.
+   CIRCLE.invoke(scope,ColorKt.Color(0x18ffffff),r*CD_HOLE_RATIO,pack(cx,cy),1f,Fill.INSTANCE,null,3);
    CIRCLE.invoke(scope,ColorKt.Color(0xccffffff),Math.max(.65f,r*.0075f),pack(cx,cy),1f,Fill.INSTANCE,null,3);
+ }
+ private static void drawDiscArtwork(DrawScope scope,Source source,FramedArtwork artwork,float aspect,float cx,float cy,float diameter)throws Exception{
+  var framing=artwork==null?VinylLabelFraming.DEFAULT:artwork.framing();
+  var box=framing.place(artwork==null?aspect:artwork.aspect(),diameter);
+  scope.getDrawContext().getCanvas().translate(cx+box.x(),cy+box.y());
+  (artwork==null?source:artwork.image()).draw(scope,box.width(),box.height());
  }
  private static Path oval(Supplier<Path> paths,float radius){
   Path path=paths.get();
@@ -360,9 +371,10 @@ final class RootRenderer {
      CLIP.invoke(canvas,finish.label(),1);
      CLIP.invoke(canvas,finish.spindleInset(),0);
      float size=radius*.75f;
-     float w=size*Math.max(1f,aspect),h=size*Math.max(1f,1f/aspect);
-     canvas.translate(-w*.5f,-h*.5f);
-     source.draw(scope,w,h);
+     var artwork=source.vinylLabel();
+     if(artwork!=null&&artwork.framing().fit())
+      circle(scope,classic?BLACK_LABEL_COLOR:color.shade(65),size*.5f,center,Fill.INSTANCE);
+     drawDiscArtwork(scope,source,artwork,aspect,0,0,size);
     }finally{canvas.restore();}
    }
    // Fill the annulus up to the cutout so label colors cannot show between the rim and hole.
@@ -383,20 +395,13 @@ final class RootRenderer {
  }
  private static ReelFinish buildReelFinish(float radius,Supplier<Path> paths,DiscSettings.ReelColor color)throws Exception{
   Path windows=paths.get();
-  float outer=radius*.866f,inner=radius*.435f;
-  for(int middle=90;middle<360;middle+=120){
-   float start=middle-13, end=middle+13;
-   reelPoint(windows,outer,start+2,true);
-   windows.arcTo(new Rect(-outer,-outer,outer,outer),start+2,22,false);
-   reelCorner(windows,outer,end,outer-radius*.018f,end);
-   reelPoint(windows,inner+radius*.018f,end,false);
-   reelCorner(windows,inner,end,inner,end-3);
-   windows.arcTo(new Rect(-inner,-inner,inner,inner),end-3,-20,false);
-   reelCorner(windows,inner,start,inner+radius*.018f,start);
-   reelPoint(windows,outer-radius*.018f,start,false);
-   reelCorner(windows,outer,start,outer,start+2);
-   windows.close();
-  }
+  ReelGeometry.windows(radius,new ReelGeometry.WindowPath(){
+   public void moveTo(float x,float y){windows.moveTo(x,y);}
+   public void lineTo(float x,float y){windows.lineTo(x,y);}
+   public void corner(float x,float y,float nextX,float nextY){windows.quadraticTo(x,y,nextX,nextY);}
+   public void arc(float r,float start,float sweep){windows.arcTo(new Rect(-r,-r,r,r),start,sweep,false);}
+   public void close(){windows.close();}
+  });
   Brush tape=(Brush)RADIAL.invoke(Brush.Companion,reelStops(
       new float[]{0,.43f,.46f,.56f,.72f,.82f,.85f,.89f},
       new int[]{0xff181411,0xff191511,0xff2b211a,0xff413128,0xff5c4939,0xff4d3c30,0xff30251e,0xff181310}),
@@ -458,7 +463,7 @@ final class RootRenderer {
       new int[]{tone(color.trim,8),tone(color.trim,-26),tone(color.trim,-12),tone(color.trim,22),
                 tone(color.trim,48),tone(color.trim,32),tone(color.trim,-14),tone(color.trim,8)}),pack(0,0));
   // The face overlaps the metal's inner edge (.970r) but stops beneath the opaque flange.
-  return new ReelFinish(radius,color,oval(paths,radius),oval(paths,radius*.985f),windows,oval(paths,radius*.057f),
+  return new ReelFinish(radius,color,oval(paths,radius),oval(paths,radius*ReelGeometry.FACE_RADIUS),windows,oval(paths,radius*ReelGeometry.SPINDLE_RADIUS),
       stroke(radius*.009f),stroke(radius*.0024f),tape,tapeGrooves,tapeEdges,reelInk(0x76140c08),reelInk(0x46c99469),hubGlass,glassReflection,glassInnerEdge,tapeSheen,stroke(radius*.036f),windowShade,
       reelInk(0x80100b08),reelInk(0xae080503),reelInk(0x94d7c7b2),reelMark(paths),
       stroke(radius*.028f),stroke(radius*.038f),flangeMetal,flangeBevel,hubBevel,hubRecess,spindleBevel,solidFace,solidTrim,glassBevel,
@@ -547,16 +552,6 @@ final class RootRenderer {
    BRUSH_PATH.invoke(scope,mark.hairlines(),ink,1f,mark.fine(),null,3);
    BRUSH_PATH.invoke(scope,mark.downstrokes(),ink,1f,mark.broad(),null,3);
   }finally{canvas.restore();}
- }
- private static void reelPoint(Path path,float radius,float degrees,boolean move){
-  double angle=Math.toRadians(degrees);
-  float x=radius*(float)Math.cos(angle),y=radius*(float)Math.sin(angle);
-  if(move)path.moveTo(x,y);else path.lineTo(x,y);
- }
- private static void reelCorner(Path path,float radius,float degrees,float nextRadius,float nextDegrees){
-  double corner=Math.toRadians(degrees),next=Math.toRadians(nextDegrees);
-  path.quadraticTo(radius*(float)Math.cos(corner),radius*(float)Math.sin(corner),
-      nextRadius*(float)Math.cos(next),nextRadius*(float)Math.sin(next));
  }
  private static kotlin.Pair<?,?>[] reelStops(float[] offsets,int[] colors)throws Exception{
   kotlin.Pair<?,?>[] stops=new kotlin.Pair<?,?>[offsets.length];
@@ -663,7 +658,7 @@ final class RootRenderer {
     circle(scope,0x856d431e,radius*.340f,center,reel.tapeLine());
     // A small contact shadow separates the raised collar from the transparent glass.
     circle(scope,0x36101317,radius*.205f,pack(radius*.005f,radius*.010f),Fill.INSTANCE);
-    circle(scope,0xff22262a,radius*.199f,center,Fill.INSTANCE);
+    circle(scope,0xff22262a,radius*ReelGeometry.HUB_RADIUS,center,Fill.INSTANCE);
     BRUSH_CIRCLE.invoke(scope,reel.hubBevel(),radius*.193f,center,1f,Fill.INSTANCE,null,3);
     BRUSH_CIRCLE.invoke(scope,reel.hubRecess(),radius*.176f,center,1f,Fill.INSTANCE,null,3);
     circle(scope,0xff111316,radius*.098f,center,Fill.INSTANCE);
@@ -691,13 +686,10 @@ final class RootRenderer {
      paintReelFaceMark(scope,canvas,radius,reel,color);
     }else{
      CLIP.invoke(canvas,reel.artworkFace(),1);
-     circle(scope,0xffff4208,radius,pack(0,0),Fill.INSTANCE);
-     if(!artwork.blankDisc()){
-      float diameter=radius*2;
-      float width=diameter*Math.max(1f,aspect),height=diameter*Math.max(1f,1f/aspect);
-      canvas.translate(-width*.5f,-height*.5f);
-      artwork.draw(scope,width,height);
-     }
+     var framed=artwork.discArtwork();
+     boolean fit=framed!=null&&framed.framing().fit();
+     circle(scope,fit?REEL_FIT_COLOR:0xffff4208,radius,pack(0,0),Fill.INSTANCE);
+     if(!artwork.blankDisc())drawDiscArtwork(scope,artwork,framed,aspect,0,0,radius*2);
     }
    }finally{canvas.restore();}
    boolean solid=artwork==null;
@@ -707,7 +699,7 @@ final class RootRenderer {
  }
  private static void blankFace(DrawScope scope,float r,float cx,float cy)throws Exception{
   // Uniform light silver-gray face: the reference has no directional light band.
-  CIRCLE.invoke(scope,ColorKt.Color(0xffdce0e3),r,pack(cx,cy),1f,Fill.INSTANCE,null,3);
+  CIRCLE.invoke(scope,ColorKt.Color(CD_FACE_COLOR),r,pack(cx,cy),1f,Fill.INSTANCE,null,3);
  }
  private static Stroke stroke(float width)throws Exception{return STROKE.newInstance(width,4f,0,0,null,null);}
  private static Brush hub(float r)throws Exception{

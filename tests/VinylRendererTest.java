@@ -81,8 +81,36 @@ public class VinylRendererTest {
    custom.graphics.fill(new Rectangle2D.Float(x-10,y-10,20,20));return true;
   },custom::path,1,100,false,null,0,true,DiscSettings.VinylColor.BLUE);
   check(custom.sourceCalls==1&&custom.bitmap.getRGB(600,200)==Color.MAGENTA.getRGB(),"custom artwork takes priority");
+  checkFramedLabel();
   comparePreparedSurface();
   System.out.println("PASS vinyl label crop, dark outer grooves, spindle transparency, restored Canvas and custom priority");
+ }
+ private static void checkFramedLabel()throws Exception{
+  var raster=new RootRasterTest.Raster(800,400);
+  var source=new RootRenderer.Source(){
+   @Override public void draw(androidx.compose.ui.graphics.drawscope.DrawScope s,float w,float h){
+    raster.graphics.setColor(Color.RED);
+    raster.graphics.fill(new Rectangle2D.Float(0,0,w,h));
+   }
+   @Override public RootRenderer.FramedArtwork vinylLabel(){
+    return new RootRenderer.FramedArtwork((s,w,h)->{
+     raster.graphics.setColor(Color.WHITE);
+     raster.graphics.fill(new Rectangle2D.Float(0,0,w,h));
+    },.5f,new VinylLabelFraming(VinylLabelFraming.Crop.FULL,true,100,0,0));
+   }
+  };
+  var color=DiscSettings.VinylColor.BLUE;
+  var finish=new RootRenderer.Finishes();
+  RootRenderer.paint(raster.scope,1,source,(s,x,y,d)->false,raster::path,1,100,false,null,90,
+      DiscSettings.Style.COLORED_VINYL,color,false,DiscSettings.ReelColor.DEFAULT,null,0,finish);
+  check(raster.bitmap.getRGB(200,200)==Color.RED.getRGB(),"sleeve still draws the original cover");
+  check(raster.bitmap.getRGB(650,200)==Color.WHITE.getRGB(),"portrait label rotates as a unit");
+  check(raster.bitmap.getRGB(600,248)==color.shade(65),"open label space is filled with the disc color");
+  check(raster.bitmap.getRGB(600,200)==0,"framed labels keep the transparent spindle");
+  RootRenderer.paint(raster.scope,1,source,(s,x,y,d)->false,raster::path,1,100,false,null,0,
+      DiscSettings.Style.BLACK_VINYL,DiscSettings.VinylColor.BLACK,false,DiscSettings.ReelColor.DEFAULT,null,0,finish);
+  check(raster.bitmap.getRGB(600,248)==Color.WHITE.getRGB(),"classic vinyl can use the independent portrait label");
+  check(raster.bitmap.getRGB(650,200)==RootRenderer.BLACK_LABEL_COLOR,"classic vinyl fills uncovered label with black");
  }
  private static void comparePreparedSurface()throws Exception{
   int side=400,radius=196;

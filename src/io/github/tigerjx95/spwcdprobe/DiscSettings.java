@@ -16,16 +16,10 @@ final class DiscSettings implements AutoCloseable {
  static final String VINYL_COLOR_KEY="disc_vinyl_color";
  static final String MOTION_SPEED_KEY="disc_motion_speed";
  static final String TRIM_COVER_KEY="cover_white_border_mode";
+ static final String COVER_FRAMING_KEY="cover_framing";
  static final String LEGACY_TRIM_COVER_KEY="trim_cover_white_borders";
  static final String ROTATION_SPEED_KEY="disc_rotation_speed";
  static final String LOCAL_NAMES_KEY="disc_local_names";
- enum Speed {
-  SLOW(1.35,30_000_000_000L),STANDARD(1.0,DiscRotation.PERIOD),FAST(.75,12_000_000_000L);
-  private final double motionScale;
-  final long rotationPeriod;
-  Speed(double motionScale,long rotationPeriod){this.motionScale=motionScale;this.rotationPeriod=rotationPeriod;}
-  long duration(long nanos){return Math.round(nanos*motionScale);}
- }
  enum VinylColor {
   BLACK("黑色",0x555555), BLUE("海洋蓝",0x25b5d6), GREEN("翡翠绿",0x4ec68b),
   AMBER("琥珀金",0xf3b950), PURPLE("鸢尾紫",0xb98de1), PINK("樱花粉",0xf4a8cb), RED("玫瑰红",0xd25970), RANDOM("随机色",0x25b5d6);
@@ -93,19 +87,87 @@ final class DiscSettings implements AutoCloseable {
   ArtworkSource(String description){this(description,ArtworkKind.UNKNOWN);}
   boolean customImage(){return kind==ArtworkKind.CUSTOM;}
  }
- record Appearance(Style style,VinylColor color,ReelColor reelColor){
+ record Appearance(Style style,VinylColor color,ReelColor reelColor,VinylLabelFraming vinylLabel){
+  Appearance(Style style,VinylColor color,ReelColor reelColor){this(style,color,reelColor,VinylLabelFraming.DEFAULT);}
   Appearance(Style style,VinylColor color){this(style,color,ReelColor.DEFAULT);}
   Appearance {
    if(color==VinylColor.BLACK)color=VinylColor.BLUE;
+   if(style!=Style.COLORED_VINYL)vinylLabel=VinylLabelFraming.DEFAULT;
   }
   VinylColor finish(){return style==Style.COLORED_VINYL?color:VinylColor.BLACK;}
  }
- record Values(int amount,boolean front,boolean rotate,Appearance appearance,Speed motionSpeed,Speed rotationSpeed,List<String> localNames,CoverWhiteBorders.Mode trimCover,Map<AlbumKey,Appearance> albumStyles){
-  Values(int amount,boolean front,boolean rotate,boolean vinyl,Speed motionSpeed,Speed rotationSpeed){
-   this(amount,front,rotate,new Appearance(vinyl?Style.BLACK_VINYL:Style.CD,VinylColor.BLUE),motionSpeed,rotationSpeed,LocalDiscService.DEFAULT_NAMES,CoverWhiteBorders.Mode.OFF,Map.of());
+ enum FramingTarget {
+  BLACK_VINYL("黑胶"), COLORED_VINYL("彩胶"), BOTH_VINYL("黑胶和彩胶"),
+  CD("CD"), REEL_COVER("封面磁带"), BOTH_DISC("CD 和封面磁带");
+
+  final String label;
+  FramingTarget(String label){this.label=label;}
+
+  boolean accepts(Style style){
+   return switch(this){
+    case BLACK_VINYL -> style==Style.BLACK_VINYL;
+    case COLORED_VINYL -> style==Style.COLORED_VINYL;
+    case BOTH_VINYL -> style.vinyl();
+    case CD -> style==Style.CD;
+    case REEL_COVER -> style==Style.REEL_COVER;
+    case BOTH_DISC -> style==Style.CD||style==Style.REEL_COVER;
+   };
   }
-  Values(int amount,boolean front,boolean rotate,boolean vinyl){this(amount,front,rotate,vinyl,Speed.STANDARD,Speed.STANDARD);}
+
+  boolean vinyl(){return this==BLACK_VINYL||this==COLORED_VINYL||this==BOTH_VINYL;}
+ }
+ record FramingChoice(FramingTarget target,VinylLabelFraming framing){
+  VinylLabelFraming forStyle(Style style){return target.accepts(style)?framing:null;}
+  String encode(){return target.name()+":"+framing.encode();}
+
+  static FramingChoice decode(String value,boolean vinyl){
+   if(value.equals("-"))return null;
+   int split=value.indexOf(':');
+   if(split<0)return vinyl?new FramingChoice(FramingTarget.COLORED_VINYL,VinylLabelFraming.decode(value)):null;
+   var target=FramingTarget.valueOf(value.substring(0,split));
+   return target.vinyl()==vinyl?new FramingChoice(target,VinylLabelFraming.decode(value.substring(split+1))):null;
+  }
+ }
+ record AlbumFraming(FramingChoice label,VinylLabelFraming cd,VinylLabelFraming reel){
+  static final AlbumFraming FOLLOW=new AlbumFraming(null,null,null);
+
+  VinylLabelFraming forStyle(Style style){
+   return switch(style){
+    case BLACK_VINYL,COLORED_VINYL -> label==null?null:label.forStyle(style);
+    case CD -> cd;
+    case REEL_COVER -> reel;
+    case REEL -> null;
+   };
+  }
+
+  String encode(){return (label==null?"-":label.encode())+" "+encode(cd)+" "+encode(reel);}
+  private static String encode(VinylLabelFraming framing){return framing==null?"-":framing.encode();}
+  private static VinylLabelFraming decodeFace(String value){
+   return value.equals("-")?null:VinylLabelFraming.decode(value);
+  }
+
+  static AlbumFraming decode(String[] fields){
+   var label=FramingChoice.decode(fields[3],true);
+   if(fields.length==6)return new AlbumFraming(label,decodeFace(fields[4]),decodeFace(fields[5]));
+   // Previous versions stored one optional face crop with a CD/reel scope.
+   var face=fields.length==5?FramingChoice.decode(fields[4],false):null;
+   return face==null?new AlbumFraming(label,null,null):
+       new AlbumFraming(label,face.forStyle(Style.CD),face.forStyle(Style.REEL_COVER));
+  }
+ }
+ record CoverFraming(CoverWhiteBorders.Mode mode,Map<AlbumKey,AlbumFraming> albums,Map<String,FramingChoice> presets){
+  AlbumFraming forAlbum(AlbumKey album){return album==null?AlbumFraming.FOLLOW:albums.getOrDefault(album,AlbumFraming.FOLLOW);}
+ }
+ record Values(int amount,boolean front,boolean rotate,Appearance appearance,DiscSpeed motionSpeed,DiscSpeed rotationSpeed,List<String> localNames,CoverWhiteBorders.Mode trimCover,Map<AlbumKey,Appearance> albumStyles,Map<AlbumKey,AlbumFraming> albumFramings){
+  Values(int amount,boolean front,boolean rotate,boolean vinyl,DiscSpeed motionSpeed,DiscSpeed rotationSpeed){
+   this(amount,front,rotate,new Appearance(vinyl?Style.BLACK_VINYL:Style.CD,VinylColor.BLUE),motionSpeed,rotationSpeed,LocalDiscService.DEFAULT_NAMES,CoverWhiteBorders.Mode.OFF,Map.of(),Map.of());
+  }
+  Values(int amount,boolean front,boolean rotate,boolean vinyl){this(amount,front,rotate,vinyl,DiscSpeed.STANDARD,DiscSpeed.STANDARD);}
   Appearance appearanceFor(AlbumKey album){return album==null?appearance:albumStyles.getOrDefault(album,appearance);}
+  VinylLabelFraming framingFor(AlbumKey album,Style style){
+   var framing=album==null?null:albumFramings.get(album);
+   return framing==null?null:framing.forStyle(style);
+  }
   boolean vinyl(){return appearance.style().vinyl();}
   VinylColor vinylColor(){return appearance.finish();}
  }
@@ -113,6 +175,7 @@ final class DiscSettings implements AutoCloseable {
  private final ConfigManager manager;
  private final ConfigHelper appearanceConfig;
  private volatile Map<AlbumKey,Appearance> albumStyles=Map.of();
+ private volatile CoverFraming coverFraming;
  private volatile List<String> localOrder=LocalDiscService.DEFAULT_NAMES;
  private final Consumer<Values> update;
  private final AtomicLong revision=new AtomicLong();
@@ -120,6 +183,7 @@ final class DiscSettings implements AutoCloseable {
  private volatile boolean active=true;
  private DiscOrderDialog orderDialog;
  private DiscAppearanceDialog appearanceDialog;
+ private CoverFramingDialog framingDialog;
  DiscSettings(ConfigManager manager,Consumer<Values> update){
   this(manager,update,()->new ArtworkSource("盘面来源暂不可用"),()->null);
  }
@@ -128,17 +192,23 @@ final class DiscSettings implements AutoCloseable {
  }
  DiscSettings(ConfigManager manager,Consumer<Values> update,Supplier<ArtworkSource> artworkSource,Supplier<AlbumKey> playingAlbum,
      Consumer<Appearance> prepareDefault){
+  this(manager,update,artworkSource,playingAlbum,prepareDefault,(album,color)->null);
+ }
+ DiscSettings(ConfigManager manager,Consumer<Values> update,Supplier<ArtworkSource> artworkSource,Supplier<AlbumKey> playingAlbum,
+     Consumer<Appearance> prepareDefault,BiFunction<AlbumKey,VinylColor,VinylLabelEditor.Sample> labelSample){
   this.manager=manager;this.update=update;
   try{
    appearanceConfig=manager.getConfig(APPEARANCE_CONFIG);
    var runtimeConfig=manager.getConfig("config.json");
    migrateAppearance(runtimeConfig);
    albumStyles=readAlbumStyles();
+   coverFraming=readCoverFraming();
    localOrder=readOrder(runtimeConfig);
    manager.addConfigChangeListener("config.json",listener);
    update.accept(read(runtimeConfig));
    orderDialog=new DiscOrderDialog(this,artworkSource);
    appearanceDialog=new DiscAppearanceDialog(this,playingAlbum,artworkSource,prepareDefault);
+   framingDialog=new CoverFramingDialog(this,FramingAlbumLibrary::playingEntry,labelSample);
   }catch(RuntimeException error){close();throw error;}
  }
  private Values read(ConfigHelper config){
@@ -150,7 +220,9 @@ final class DiscSettings implements AutoCloseable {
   boolean rotate;
   try{Object value=config.get(ROTATE_KEY,false);rotate=Boolean.TRUE.equals(value)||value instanceof String text&&text.equalsIgnoreCase("true");}
   catch(RuntimeException invalid){rotate=false;}
-  return new Values(amount,front,rotate,appearance(config),speed(config,MOTION_SPEED_KEY),speed(config,ROTATION_SPEED_KEY),localOrder,trimCover(config),albumStyles);
+  var framing=coverFraming;
+  var mode=framing.mode()==null?trimCover(config):framing.mode();
+  return new Values(amount,front,rotate,appearance(config),speed(config,MOTION_SPEED_KEY),speed(config,ROTATION_SPEED_KEY),localOrder,mode,albumStyles,framing.albums());
  }
  static CoverWhiteBorders.Mode trimCover(ConfigHelper config){
   try{
@@ -173,17 +245,23 @@ final class DiscSettings implements AutoCloseable {
  private static Appearance decodeAppearance(String value){
   String[] saved=value.split(":",-1);
   if(saved.length!=2&&saved.length!=3)return null;
-  return new Appearance(Style.valueOf(saved[0]),VinylColor.valueOf(saved[1]),
-      saved.length==3?parseReelColor(saved[2]):ReelColor.DEFAULT);
+  String[] options=saved.length==3?saved[2].split("~",2):new String[]{ReelColor.DEFAULT.name()};
+  return new Appearance(Style.valueOf(saved[0]),VinylColor.valueOf(saved[1]),parseReelColor(options[0]),
+      options.length==2?VinylLabelFraming.decode(options[1]):VinylLabelFraming.DEFAULT);
  }
  private static String encodeAppearance(Appearance appearance){
   String encoded=appearance.style().name()+":"+appearance.color().name();
+  if(!VinylLabelFraming.DEFAULT.equals(appearance.vinylLabel()))
+   return encoded+":"+appearance.reelColor().name()+"~"+appearance.vinylLabel().encode();
   return appearance.reelColor()==ReelColor.DEFAULT?encoded:encoded+":"+appearance.reelColor().name();
  }
  Appearance albumAppearance(AlbumKey album){return albumStyles.get(album);}
  synchronized boolean saveAlbumAppearance(AlbumKey album,Appearance appearance){
   if(!active||album==null||album.album()==null)return false;
   if(Objects.equals(appearance,albumStyles.get(album)))return true;
+  var framing=coverFraming;
+  if(framing.mode()==null&&framing.forAlbum(album).label()!=null
+      &&!saveCoverFraming(coverFraming().mode(),null,AlbumFraming.FOLLOW))return false;
   var next=new HashMap<>(albumStyles);
   if(appearance==null)next.remove(album);else next.put(album,appearance);
   var records=new StringJoiner("\n");
@@ -208,6 +286,68 @@ final class DiscSettings implements AutoCloseable {
   albumStyles=snapshot;
   changed(runtimeConfig);
   return true;
+ }
+ CoverFraming coverFraming(){
+  var saved=coverFraming;
+  return saved.mode()==null?new CoverFraming(trimCover(manager.getConfig("config.json")),saved.albums(),saved.presets()):saved;
+ }
+ synchronized boolean saveCoverFraming(CoverWhiteBorders.Mode mode,AlbumKey album,AlbumFraming framing){
+  var edited=album==null||album.album()==null?Map.<AlbumKey,AlbumFraming>of():Map.of(album,framing);
+  return saveCoverFraming(mode,edited,coverFraming.presets());
+ }
+ synchronized boolean saveCoverFraming(CoverWhiteBorders.Mode mode,Map<AlbumKey,AlbumFraming> edited,Map<String,FramingChoice> presets){
+  if(!active)return false;
+  var albums=new HashMap<>(coverFraming.albums());
+  edited.forEach((album,framing)->{
+   if(album.album()==null)return;
+   if(AlbumFraming.FOLLOW.equals(framing))albums.remove(album);else albums.put(album,framing);
+  });
+  var next=new CoverFraming(mode,Map.copyOf(albums),Map.copyOf(presets));
+  if(next.equals(coverFraming))return true;
+  var records=new StringJoiner("\n").add(mode.name());
+  next.albums().forEach((key,value)->records.add(packAlbumField(key.album())+" "+packAlbumField(key.artist())+" "
+      +key.year()+" "+value.encode()));
+  next.presets().forEach((name,preset)->records.add("@preset "+packAlbumField(name)+" "+preset.encode()));
+  var runtimeConfig=manager.getConfig("config.json");
+  if(!persistSetting(COVER_FRAMING_KEY,records.toString()))return false;
+  coverFraming=next;
+  changed(runtimeConfig);
+  return true;
+ }
+ private CoverFraming readCoverFraming(){
+  String stored;
+  try{stored=appearanceConfig.get(COVER_FRAMING_KEY,"");}
+  catch(RuntimeException invalid){stored="";}
+  var albums=new HashMap<AlbumKey,AlbumFraming>();
+  var presets=new LinkedHashMap<String,FramingChoice>();
+  if(stored.isBlank()){
+   albumStyles.forEach((key,value)->{
+    if(!VinylLabelFraming.DEFAULT.equals(value.vinylLabel()))
+     albums.put(key,new AlbumFraming(new FramingChoice(FramingTarget.COLORED_VINYL,value.vinylLabel()),null,null));
+   });
+   return new CoverFraming(null,Map.copyOf(albums),Map.of());
+  }
+  String[] records=stored.split("\n");
+  CoverWhiteBorders.Mode mode;
+  try{mode=CoverWhiteBorders.Mode.valueOf(records[0]);}
+  catch(IllegalArgumentException invalid){mode=CoverWhiteBorders.Mode.OFF;}
+  for(int i=1;i<records.length;i++)try{
+   String[] fields=records[i].split(" ",-1);
+   if(fields.length==3&&fields[0].equals("@preset")){
+    String name=unpackAlbumField(fields[1]);
+    var target=FramingTarget.valueOf(fields[2].split(":",2)[0]);
+    var choice=FramingChoice.decode(fields[2],target.vinyl());
+    if(!name.isBlank()&&choice!=null&&choice.target()!=FramingTarget.BOTH_DISC)presets.put(name,choice);
+    continue;
+   }
+   if(fields.length<4||fields.length>6)continue;
+   String title=unpackAlbumField(fields[0]);
+   if(title.isBlank())continue;
+   String artist=fields[1].equals("-")?null:unpackAlbumField(fields[1]);
+   var framing=AlbumFraming.decode(fields);
+   if(!AlbumFraming.FOLLOW.equals(framing))albums.put(new AlbumKey(title,artist,Integer.parseInt(fields[2]),null),framing);
+  }catch(IllegalArgumentException invalid){ /* Ignore just the damaged record. */ }
+  return new CoverFraming(mode,Map.copyOf(albums),Map.copyOf(presets));
  }
  private Map<AlbumKey,Appearance> readAlbumStyles(){
   var records=new HashMap<AlbumKey,Appearance>();
@@ -303,9 +443,9 @@ final class DiscSettings implements AutoCloseable {
   try{return VinylColor.valueOf(config.get(VINYL_COLOR_KEY,VinylColor.BLACK.name()));}
   catch(RuntimeException invalid){return VinylColor.BLACK;}
  }
- private static Speed speed(ConfigHelper config,String key){
-  try{return Speed.valueOf(config.get(key,Speed.STANDARD.name()));}
-  catch(RuntimeException invalid){return Speed.STANDARD;}
+ private static DiscSpeed speed(ConfigHelper config,String key){
+  try{return DiscSpeed.valueOf(config.get(key,DiscSpeed.STANDARD.name()));}
+  catch(RuntimeException invalid){return DiscSpeed.STANDARD;}
  }
  private void changed(ConfigHelper config){
   if(!active)return;
@@ -317,6 +457,7 @@ final class DiscSettings implements AutoCloseable {
  }
  @Override public synchronized void close(){
   if(!active)return;active=false;revision.incrementAndGet();
+  if(framingDialog!=null){framingDialog.close();framingDialog=null;}
   if(appearanceDialog!=null){appearanceDialog.close();appearanceDialog=null;}
   if(orderDialog!=null){orderDialog.close();orderDialog=null;}
   try{manager.removeConfigChangeListener(listener);}

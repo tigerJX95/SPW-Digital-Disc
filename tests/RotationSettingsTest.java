@@ -41,7 +41,7 @@ public class RotationSettingsTest {
    check(values.getLast().equals(new DiscSettings.Values(100,true,true,true)),"vinyl setting independent of other options");
    helper.set(DiscSettings.MOTION_SPEED_KEY,"FAST");helper.set(DiscSettings.ROTATION_SPEED_KEY,"SLOW");
    manager.fire();DiscSettingsTest.flush();
-   check(values.getLast().equals(new DiscSettings.Values(100,true,true,true,DiscSettings.Speed.FAST,DiscSettings.Speed.SLOW)),"independent speed selections");
+   check(values.getLast().equals(new DiscSettings.Values(100,true,true,true,DiscSpeed.FAST,DiscSpeed.SLOW)),"independent speed selections");
    helper.set(DiscSettings.VINYL_COLOR_KEY,"BLUE");manager.fire();DiscSettingsTest.flush();
    check(settings.appearance().equals(new DiscSettings.Appearance(DiscSettings.Style.COLORED_VINYL,DiscSettings.VinylColor.BLUE)),"legacy blue vinyl migrates");
    check(settings.saveAppearance(new DiscSettings.Appearance(DiscSettings.Style.BLACK_VINYL,DiscSettings.VinylColor.PINK)),"save style and remembered color");
@@ -51,7 +51,7 @@ public class RotationSettingsTest {
   }
   try(var settings=new DiscSettings(new DiscSettingsTest.Manager(file,DiscSettingsTest.helper(file)),values::add)){
    check(settings.appearance().equals(new DiscSettings.Appearance(DiscSettings.Style.BLACK_VINYL,DiscSettings.VinylColor.PINK))
-     &&values.getLast().motionSpeed()==DiscSettings.Speed.FAST&&values.getLast().rotationSpeed()==DiscSettings.Speed.SLOW,"restart restores color, both speeds and vinyl");
+     &&values.getLast().motionSpeed()==DiscSpeed.FAST&&values.getLast().rotationSpeed()==DiscSpeed.SLOW,"restart restores color, both speeds and vinyl");
   }
   Files.delete(file.resolveSibling(DiscSettings.APPEARANCE_CONFIG));
   var invalid=DiscSettingsTest.helper(file);

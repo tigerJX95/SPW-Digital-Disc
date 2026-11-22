@@ -4,13 +4,10 @@
 
 Adds a digital CD presentation to Salt Player (SPW), with a complete album cover and a CD extending from its right side.
 
-Current version **v1.12.0**
+Current version **v1.13.0**
 
-- A new cover transition plays before the disc slides out. Clicking the cover smoothly moves it from its original position to the center while enlarging it.
-- The cover starts to shrink and slide back as the disc finishes retracting, or returns directly in cover-only mode. The click target follows the animation. The cover and reflection share the same rounded corners throughout.
-- The cover smoothly aligns with the native cover's position and size before the handoff to prevent a jump. It also returns to the native cover area after switching tracks in the expanded view.
-- The custom disc artwork lookup order is retained when upgrading or adjusting settings such as disc exposure.
-- Improves the first eject after changing the default disc style and fixes a hitch when switching to solid-color open-reel tape with rotation enabled.
+- Moved the existing white-border trimming settings for the large cover into the Cover Cropping and Disc Framing window and added a live preview.
+- Added independent framing for CDs, black or colored vinyl center labels, and cover reels. Frame one album at a time in the same window with a live preview of cropping, zoom, and position. Switch albums and save their drafts together with **Confirm**.
 
 [Update history](CHANGELOG.md) (Chinese)
 
@@ -32,9 +29,7 @@ I wanted to bring this digital record experience to Salt Player: enjoying the co
 - **Generated disc artwork**: when custom artwork is unavailable, a copy of the album cover fills a circular CD with a narrow white edge, translucent annular hub, translucent center hole and tiny white spindle. Two narrow silver bevels use adjacent highlights and grooves around a translucent hub field, preserving the artwork underneath; the main cover remains complete.
 - **Open-reel tape**: choose Open-Reel Tape under Default Disc Style, then select Solid Color or Album Cover. Solid Color offers Brushed Silver, Champagne Gold, Vibrant Orange, Ivory White, Graphite Gray, Deep Wine Red, and Random, with Brushed Silver selected by default. The random color stays the same within an album and changes when switching albums. Available custom disc artwork takes priority.
 - **Album disc style**: Select **当前专辑盘面样式** (Current Album Disc Style) in the plugin settings to set a style for the currently playing album. Reset restores the global default for that album. Custom disc artwork takes priority.
-- Cover Border Trimming is off by default. Choose paired horizontal or vertical borders, or trim only the disc-side strip when both the left and right edges have continuous near-white borders.
-
-  Trimming affects only the secondary display and leaves the original artwork file intact. Stretching a heavily cropped image to fill a square can distort people in the cover art, so the plugin uses the cropped aspect ratio when the result is substantially wider or taller than a square. Trimming checks the color of edge pixels. Top and bottom borders must match. If text or other details interrupt a border, both edges are preserved. This feature detects only white or near-white edges. Red, black, and other borders are preserved because they may be part of the original composition. A white border may also be retained if it has a noticeable color cast, marks, or text and artwork extending to the edge. For a square cover that preserves the original proportions and composition, we recommend using an AI image tool to extend the background, then setting the result as the album cover.
+- **Cover cropping and disc framing**: Trim white borders on the large cover or frame the disc artwork separately on the secondary display. [See how to crop and frame artwork](#cover-cropping-and-disc-framing).
 - **Transparent images**: custom PNG files retain their existing transparent backgrounds and center holes. An antialiased circular outer mask is applied. No extra center hole or hub ring is added.
 - **Front-disc display**: enable the native plugin switch to draw the disc over the cover. Off by default. Front mode uses whole-disc motion with a short uniform fade. Compare at exposure 50; in front mode exposure controls horizontal travel, while 0 still shows only the cover.
 - **Disc exposure setting**: open SPW Digital Disc settings in the plugin manager and adjust 0–100. Default 50 preserves the existing view; 100 shows the full disc. The host saves the value. The group fits the window, and cover-only mode returns without a retract delay.
@@ -52,7 +47,7 @@ https://github.com/user-attachments/assets/8a289172-d79b-4e2e-9ba2-c7dc9ee5d86c
 
 The plugin includes interface mappings for SPW 1.19.0 and 1.19.3 from the Microsoft Store. See the verification section for this release and the [changelog](CHANGELOG.md) for results from earlier releases.
 
-1. Obtain the compiled `.spmod` file. The source ZIP cannot be installed directly; see the build instructions below to compile it yourself.
+1. Extract `SPW_Digital_Disc_v1.13.0.spmod` from the release ZIP. See the build instructions below to compile it yourself.
 2. In SPW's plugin manager, use the local plugin import option to select the `.spmod` file.
 3. Grant `class-transform` and `library-read` when prompted, enable the plugin, and restart SPW.
 4. Play a song from the local machine or an accessible network share. Click the bottom playback bar to open the primary detail page, then click the album cover to open the secondary display page.
@@ -63,6 +58,34 @@ At Standard speed, ejection takes about 700 ms. Returning from a fully open disc
 After a track change, the plugin waits for a selection-stability interval of about 280 ms and for the cover and disc lookup to be ready before ejecting the disc. Further track changes during this interval replace the pending request; intermediate songs are not replayed in sequence. Once a cover source takes over, old nodes from that transition cannot overwrite it. When the page is collapsed to the playback bar and reopened, the plugin waits until the host has fully expanded before replaying the cover-first entry and disc eject animations. The expansion process does not consume the disc animation's time.
 
 Collapsing the entire playback detail page or disabling the plugin cancels unfinished animations and delayed return actions, preventing remnants from appearing over the mini player.
+
+## Cover cropping and disc framing
+
+Open **封面裁切与盘面取景** (Cover Cropping and Disc Framing) in the plugin settings. Both tabs change how artwork appears on the secondary display. The original artwork file stays intact.
+
+The window opens with a preview of the album currently playing. After playback moves to another album, click **定位正在播放的专辑** (Go to Playing Album) at the upper right of either tab to switch the preview and edit that album. If the next track is on the same album, the button reloads that track's cover. Each album keeps its own draft until you click **Confirm** to save them together.
+
+| What to adjust | Where to set it | Scope |
+| --- | --- | --- |
+| Large cover on the left | White-border trimming in **大封面** (Large Cover) | Global setting for large covers on the secondary display |
+| Disc artwork using the same crop | **盘面取景 → 取景方式 → 跟随大封面** (Disc Framing → Framing Method → Follow Large Cover) | The current disc inherits the large-cover crop and follows future changes to it |
+| Disc artwork with its own composition | **盘面取景 → 取景方式 → 单独调整** (Disc Framing → Framing Method → Adjust Separately) | Saved per album and disc artwork type. Uses the original artwork with its own crop |
+
+### Trim white borders or frame a disc separately
+
+- **Large Cover** has white-border trimming off by default. **自动裁切对边** (Auto-trim Opposite Edges) detects pairs of left and right or top and bottom borders. **仅裁右侧白边** (Trim Right White Border Only) first checks for continuous near-white borders on both sides, then trims the right side. Edges with strong color casts, text, or artwork may be kept. When the trimmed image is substantially wider or taller than a square, the large cover keeps the cropped aspect ratio.
+- The Large Cover preview displays the image whenever the cover is available. When the selected rule finds nothing to trim, the preview shows the original with an explanation. If artwork is unavailable, click **重新读取封面** (Reload Cover). The preview first tries the player's current cover, then the library cover.
+- **Adjust Separately** lets you crop four edges, zoom, and position the image. The first time you select it, the current large-cover crop is used as a starting point. Further adjustments are saved independently for CD artwork, the vinyl center label, or cover reel artwork. The center label can apply to black vinyl, colored vinyl, or both.
+- **去成对白边** (Trim Paired White Borders) detects paired white edges on the original image and replaces the four crop values for the current disc. The large-cover setting stays intact, and the two crops never accumulate. Use the four crop sliders to remove colored borders. To make the disc follow future large-cover changes again, select **Follow Large Cover**.
+
+For example, to keep the white border on the large cover and show only the artwork on the colored vinyl label, set **Large Cover** trimming to **Off**. Under **Disc Framing**, choose vinyl, **Adjust Separately**, and colored vinyl as the target. Click **Trim Paired White Borders**, then use the preview to adjust zoom and position. Any available custom disc image takes priority for the disc on the right.
+
+### Edit one album at a time in the same window
+
+1. Click **选择专辑** (Select Album) and search by album or artist. The field accepts Chinese text from your input method. Click an album to open its disc framing while playback continues.
+2. Choose a disc type and **Adjust Separately**. You can start with **Trim Paired White Borders**, then use the circular preview to adjust the crop, zoom, and position for that album. For a tall cover, use **保留构图** (Preserve Composition) to check how much of the subject and title fits.
+3. Select the next album to keep editing. The editor keeps the current preview while the next cover loads, then updates the album name and preview together. If you select several albums quickly, the last selection takes effect.
+4. Click **Confirm** to save the framing for each album you edited, or **Cancel** to discard the drafts.
 
 ## Where to put custom disc images
 
@@ -121,13 +144,13 @@ Front mode moves the complete disc with a short uniform fade at entry and exit. 
 
 Only the disc rotates; the cover stays upright and the reflection shares the angle. Each start accelerates smoothly from rest over about 240 ms, then follows the selected speed (20 seconds per turn at Standard). Pausing or starting retraction freezes the current angle immediately. Playback resumes gently from that angle without replaying paused time. A new track starts upright. Ejection, retraction and exposure 0 do not rotate. Collapsing the secondary page to the mini player freezes the angle; reopening resumes after ejection completes. Returning to the primary page ends that presentation, so entering the secondary page again starts upright. Disabling rotation restores the upright orientation.
 
-## v1.12.0 verification
+## v1.13.0 verification
+
+Offline checks cover single-album trimming, album search, preview and status text during asynchronous cover switching, framing drafts, settings persistence, and Chinese input events. Pushes and pull requests run the [core regression checks](../tests/FIRST_REVEAL.md).
 
 | SPW host | Offline regression |
 | --- | --- |
-| 1.19.3 Microsoft Store | 52 tests passed |
-
-Native checks on Windows 11 with SPW 1.19.3 Steam covered the first opening after startup with black vinyl and reel-to-reel, and the first opening after switching in both directions between reel-to-reel and album-cover CD and between black vinyl and colored vinyl. With rotation enabled, switching from album-cover CD to the Ivory White and Champagne Gold reels used the prepared artwork for both the first eject and the start of rotation.
+| 1.19.3 Microsoft Store | 55 tests passed |
 
 Offline tests cover interface resolution, cover calls, configuration storage, images, animations and rotation state. They do not run Windows native playback or Skia rendering. Startup verifies playback-controller and sheet-state fingerprints, then locates the cover entry, caller and sheet-state accessor using metadata, signatures and a unique call relationship. The cover painter must be the unique structural match and pass an implementation fingerprint normalized for its own obfuscated identifiers and debug metadata. Discovery results are cached per host class loader. Missing or ambiguous targets prevent activation with a detailed error. Startup also validates playback and artwork-loading interfaces and rejects incompatible hosts. If playback state cannot be read during operation, rotation stops and a warning is logged.
 
@@ -208,7 +231,7 @@ If using PowerShell, configure the same environment variables and run this in th
 After the build reports `BUILD SUCCESSFUL`, look in the source directory's `dist` folder for:
 
 ```text
-SPW_Digital_Disc_v1.12.0.spmod
+SPW_Digital_Disc_v1.13.0.spmod
 ```
 
 This is the installation package that SPW can import. You do not need to ZIP the entire source directory or rename its extension. The `build` directory contains intermediate build output, not the installation package.

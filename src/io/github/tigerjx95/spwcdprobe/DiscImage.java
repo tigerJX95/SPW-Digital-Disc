@@ -58,6 +58,27 @@ final class DiscImage implements AutoCloseable {
  }
  Image snapshot(){return Image.Companion.makeFromBitmap(nativeBitmap);}
  float aspect(){return (float)width/height;}
+ CoverWhiteBorders.Bounds labelBounds(VinylLabelFraming.Crop crop){return crop.pixels(width,height);}
+ java.awt.image.BufferedImage labelPreview(){return labelPreview(nativeBitmap);}
+ static java.awt.image.BufferedImage labelPreview(Bitmap bitmap){
+  int sourceWidth=bitmap.getWidth(),sourceHeight=bitmap.getHeight();
+  float scale=Math.min(1,480f/Math.max(sourceWidth,sourceHeight));
+  int w=Math.max(1,Math.round(sourceWidth*scale)),h=Math.max(1,Math.round(sourceHeight*scale));
+  try(var original=Image.Companion.makeFromBitmap(bitmap);var surface=Surface.Companion.makeRasterN32Premul(w,h)){
+   surface.getCanvas().clear(0);
+   surface.getCanvas().drawImageRect(original,0,0,sourceWidth,sourceHeight,0,0,w,h,
+       org.jetbrains.skia.SamplingMode.Companion.getLINEAR(),null,true);
+   try(var thumbnail=surface.makeImageSnapshot();var pixels=Bitmap.Companion.makeFromImage(thumbnail)){
+    byte[] rgba=pixels.readPixels(new ImageInfo(w,h,ColorType.RGBA_8888,ColorAlphaType.UNPREMUL),w*4,0,0);
+    if(rgba==null)return null;
+    var preview=new java.awt.image.BufferedImage(w,h,java.awt.image.BufferedImage.TYPE_INT_ARGB);
+    int[] argb=((java.awt.image.DataBufferInt)preview.getRaster().getDataBuffer()).getData();
+    for(int i=0,j=0;i<argb.length;i++,j+=4)
+     argb[i]=(rgba[j+3]&255)<<24|(rgba[j]&255)<<16|(rgba[j+1]&255)<<8|(rgba[j+2]&255);
+    return preview;
+   }
+  }
+ }
  void drawCover(DrawScope scope,float w,float h)throws Exception{
   DRAW_IMAGE.invoke(scope,bitmap,0L,pack(width,height),0L,pack(Math.max(1,Math.round(w)),Math.max(1,Math.round(h))),1f,Fill.INSTANCE,null,3);
  }

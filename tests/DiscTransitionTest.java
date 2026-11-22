@@ -33,7 +33,7 @@ public class DiscTransitionTest {
   m.enter();m.close(t,calls::incrementAndGet);check(m.finished(),"back while loading returns without waiting");
   m.enter();m.ready(t);m.tick(t+940_000_000);m.close(t+1_000_000_000L,calls::incrementAndGet);int n=calls.get();m.reset();m.tick(t+4_000_000_000L);check(calls.get()==n,"unload cancels delayed host callback");
   m.enter();m.ready(t);m.tick(t+100_000_000_000L);check(m.pose().exposed()==1,"delayed frame catches up using elapsed time");
-  for(var speed:DiscSettings.Speed.values()){
+  for(var speed:DiscSpeed.values()){
    m.setSpeed(speed);m.enter();m.ready(t);
    long end=t+speed.duration(240_000_000L)+speed.duration(700_000_000L);
    m.tick(end-1_000_000L);check(m.phase()==DiscTransition.Phase.OPENING,"opening still active before preset endpoint");

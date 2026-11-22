@@ -80,14 +80,11 @@
           "on_click": "io.github.tigerjx95.spwcdprobe.DiscOrderDialog.open"
         },
         {
-          "type": "list",
-          "key": "cover_white_border_mode",
-          "title": "封面白边裁切",
-          "summary": "仅用于二级展示页。仅裁右侧时，左右两侧均须有连续近白色边缘。",
-          "entries": ["关闭", "自动裁切对边", "仅裁右侧白边"],
-          "entry_values": ["OFF", "PAIRED", "RIGHT"],
-          "default_value": "OFF"
-                }
+          "type": "button",
+          "title": "封面裁切与盘面取景",
+          "summary": "设置大封面裁切，或按专辑裁切、缩放和移动盘面封面。",
+          "on_click": "io.github.tigerjx95.spwcdprobe.CoverFramingDialog.open"
+        }
       ]
     }
   ]

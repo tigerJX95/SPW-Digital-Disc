@@ -6,6 +6,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import javax.swing.SwingUtilities;
+import static io.github.tigerjx95.spwcdprobe.DiscSettings.*;
 public class DiscSettingsTest {
  static void check(boolean b,String why){if(!b)throw new AssertionError(why);}
  static class Manager implements ConfigManager,AutoCloseable {
@@ -72,6 +73,8 @@ public class DiscSettingsTest {
   var other=DiscSettings.AlbumKey.of("专辑 A / Edition","Other Artist","Singer B",2026,"c.flac");
   var missing=DiscSettings.AlbumKey.of(null,null,null,0,"d.flac");
   var override=new DiscSettings.Appearance(DiscSettings.Style.REEL,DiscSettings.VinylColor.BLUE,DiscSettings.ReelColor.GOLD);
+  var framing=new VinylLabelFraming(new VinylLabelFraming.Crop(90,25,110,35),false,125,.5f,-.2f);
+  var framed=new DiscSettings.Appearance(DiscSettings.Style.COLORED_VINYL,DiscSettings.VinylColor.BLUE,DiscSettings.ReelColor.DEFAULT,framing);
   var global=new DiscSettings.Appearance(DiscSettings.Style.COLORED_VINYL,DiscSettings.VinylColor.RANDOM);
   var values=new ArrayList<DiscSettings.Values>();
   var manager=new Manager(file,helper(file));
@@ -79,16 +82,18 @@ public class DiscSettingsTest {
    check(!settings.saveAlbumAppearance(missing,override),"no album metadata cannot create an override");
    check(settings.saveAlbumAppearance(first,override),"save album style");
    check(settings.saveAppearance(global),"change global style independently");
+   check(settings.saveAlbumAppearance(other,framed),"save colored label framing per album");
    manager.helper.set(DiscExposure.KEY,75f);
    check(manager.helper.save(),"native preferences save");
    manager.fire();
    flush();
    var current=values.getLast();
    check(current.amount()==75&&current.appearanceFor(same).equals(override),"album override applies to other tracks");
-   check(current.appearanceFor(other).equals(global)&&current.appearanceFor(null).equals(global),"independent album and missing metadata use global");
+   check(current.appearanceFor(other).equals(framed)&&current.appearanceFor(null).equals(global),"framing remains specific to its album");
   }
   try(var settings=new DiscSettings(new Manager(file,helper(file)),values::add)){
    check(values.getLast().appearanceFor(same).equals(override),"album override survives restart");
+   check(values.getLast().appearanceFor(other).equals(framed),"custom label framing survives restart");
    check(settings.saveAlbumAppearance(same,null),"clear album override");
    flush();
    check(values.getLast().appearanceFor(first).equals(global),"clearing resumes the current global style");
@@ -102,6 +107,104 @@ public class DiscSettingsTest {
       "preserve verified reel order and default");
   System.out.println("PASS album style precedence, shared album key, independent global settings, restart and reset");
  }
+ static void coverFramingSurvivesRestart()throws Exception{
+  Path file=Files.createTempDirectory("disc-cover-framing").resolve("config.json");
+  var legacy=new Manager(file,helper(file));
+  var album=new DiscSettings.AlbumKey("专辑",null,2026,null);
+  var inherited=new DiscSettings.AlbumKey("另一张专辑",null,2026,null);
+  var oldFraming=new VinylLabelFraming(new VinylLabelFraming.Crop(100,100,100,100),false,128,.2f,0);
+  String albumName=Base64.getEncoder().encodeToString(album.album().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+  legacy.helper.set(DiscSettings.TRIM_COVER_KEY,"RIGHT");
+  legacy.appearance.set(DiscSettings.ALBUM_STYLES_KEY,albumName+" - 2026 COLORED_VINYL:BLUE:SILVER~"+oldFraming.encode());
+  check(legacy.helper.save()&&legacy.appearance.save(),"seed test.1 native trim and embedded album label");
+  var published=new ArrayList<DiscSettings.Values>();
+  var reelFraming=new VinylLabelFraming(VinylLabelFraming.Crop.FULL,false,155,0,.3f);
+  var newLabel=new FramingChoice(FramingTarget.BOTH_VINYL,VinylLabelFraming.DEFAULT);
+  try(var settings=new DiscSettings(legacy,published::add)){
+   check(settings.coverFraming().mode()==CoverWhiteBorders.Mode.RIGHT,"old global trim retained");
+   check(published.getLast().framingFor(album,Style.COLORED_VINYL).equals(oldFraming),"label imported from test.1");
+   check(settings.saveAlbumAppearance(album,null),"reset album appearance before opening framing settings");
+   flush();
+   check(settings.albumAppearance(album)==null&&published.getLast().framingFor(album,Style.COLORED_VINYL).equals(oldFraming),"resetting style preserves framing");
+  }
+  var previous=new Manager(file,helper(file));
+  previous.appearance.set(COVER_FRAMING_KEY,"RIGHT\n"+albumName+" - 2026 "+oldFraming.encode());
+  check(previous.appearance.save(),"seed test.2 through test.4 cover framing");
+  try(var settings=new DiscSettings(previous,published::add)){
+   check(settings.coverFraming().forAlbum(album).forStyle(Style.BLACK_VINYL)==null,"earlier label choice remains colored-vinyl only");
+   check(settings.coverFraming().forAlbum(album).forStyle(Style.COLORED_VINYL).equals(oldFraming),"migration survives style change and restart");
+   check(settings.saveCoverFraming(CoverWhiteBorders.Mode.PAIRED,album,new AlbumFraming(newLabel,oldFraming,reelFraming)),"save both scopes and global crop together");
+   check(settings.albumAppearance(album)==null,"independent label never creates an album style override");
+   flush();
+   check(published.getLast().trimCover()==CoverWhiteBorders.Mode.PAIRED&&
+       published.getLast().framingFor(album,Style.COLORED_VINYL).equals(VinylLabelFraming.DEFAULT)&&
+       published.getLast().framingFor(inherited,Style.COLORED_VINYL)==null,"full image is a valid override; other albums still follow");
+   check(published.getLast().framingFor(album,Style.BLACK_VINYL).equals(VinylLabelFraming.DEFAULT),"both vinyl records use the label crop");
+   check(published.getLast().framingFor(album,Style.CD).equals(oldFraming)&&
+       published.getLast().framingFor(album,Style.REEL_COVER).equals(reelFraming)&&
+       published.getLast().framingFor(album,Style.REEL)==null,"each cover disc uses its own full-face crop, excluding the solid reel");
+  }
+  try(var settings=new DiscSettings(new Manager(file,helper(file)),published::add)){
+   check(settings.coverFraming().forAlbum(album).forStyle(Style.COLORED_VINYL).equals(VinylLabelFraming.DEFAULT),"explicit full image persists");
+   check(settings.saveCoverFraming(CoverWhiteBorders.Mode.PAIRED,album,new AlbumFraming(null,oldFraming,reelFraming)),"resume following large cover on vinyl only");
+  }
+  try(var settings=new DiscSettings(new Manager(file,helper(file)),published::add)){
+   check(settings.coverFraming().forAlbum(album).forStyle(Style.COLORED_VINYL)==null,"reset remains cleared after restart");
+   check(settings.coverFraming().forAlbum(album).forStyle(Style.CD).equals(oldFraming),"resetting label leaves the independent full-face crop saved");
+   check(settings.coverFraming().forAlbum(album).forStyle(Style.REEL_COVER).equals(reelFraming),"reel retains its own crop across restarts");
+   check(settings.coverFraming().mode()==CoverWhiteBorders.Mode.PAIRED,"saved global trim persists separately from native mode");
+  }
+  previous=new Manager(file,helper(file));
+  var legacyFaces=new StringJoiner("\n").add("RIGHT");
+  for(var target:new FramingTarget[]{FramingTarget.CD,FramingTarget.REEL_COVER,FramingTarget.BOTH_DISC}){
+   var title=Base64.getEncoder().encodeToString(target.name().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+   legacyFaces.add(title+" - 2026 "+newLabel.encode()+" "+new FramingChoice(target,oldFraming).encode());
+  }
+  previous.appearance.set(COVER_FRAMING_KEY,legacyFaces.toString());
+  check(previous.appearance.save(),"seed test.5 through test.7 face scopes");
+  try(var settings=new DiscSettings(new Manager(file,helper(file)),published::add)){
+   var config=settings.coverFraming();
+   for(var target:new FramingTarget[]{FramingTarget.CD,FramingTarget.REEL_COVER,FramingTarget.BOTH_DISC}){
+    var migrated=config.forAlbum(new DiscSettings.AlbumKey(target.name(),null,2026,null));
+    check(migrated.label().equals(newLabel),"test.7 label scope survives");
+    check(Objects.equals(migrated.cd(),target.accepts(Style.CD)?oldFraming:null),"test.7 CD scope survives");
+    check(Objects.equals(migrated.reel(),target.accepts(Style.REEL_COVER)?oldFraming:null),"test.7 reel scope survives");
+   }
+  }
+  var cdPreset=new FramingChoice(FramingTarget.CD,reelFraming);
+  var reelPreset=new FramingChoice(FramingTarget.REEL_COVER,oldFraming);
+  var blackOnly=new FramingChoice(FramingTarget.BLACK_VINYL,oldFraming);
+  var blackAlbum=AlbumKey.of("Don't you see!","ZARD",null,1997,null);
+  var otherBlackAlbum=AlbumKey.of("黑胶专辑",null,"艺人",2026,null);
+  var presets=Map.of("封面\n示例",cdPreset,"磁带预设",reelPreset);
+  try(var settings=new DiscSettings(new Manager(file,helper(file)),published::add)){
+   var config=settings.coverFraming();
+   var first=config.forAlbum(album);
+   var second=config.forAlbum(inherited);
+   check(settings.saveCoverFraming(CoverWhiteBorders.Mode.PAIRED,
+       Map.of(album,new AlbumFraming(first.label(),reelFraming,first.reel()),
+           inherited,new AlbumFraming(second.label(),second.cd(),oldFraming),
+           blackAlbum,new AlbumFraming(blackOnly,null,null),
+           otherBlackAlbum,new AlbumFraming(blackOnly,null,null)),
+       presets),"save four albums and named presets together");
+  }
+  try(var settings=new DiscSettings(new Manager(file,helper(file)),published::add)){
+   var config=settings.coverFraming();
+   check(config.presets().equals(presets),"presets round-trip without damaging names");
+   check(config.forAlbum(album).cd().equals(reelFraming),"confirmation saves the first album draft");
+   check(config.forAlbum(inherited).reel().equals(oldFraming),"confirmation saves the second album draft");
+   check(config.forAlbum(inherited).cd()==null,"confirmation saves only the edited style");
+   for(var key:List.of(blackAlbum,otherBlackAlbum)){
+    var saved=config.forAlbum(key);
+    check(oldFraming.equals(saved.forStyle(Style.BLACK_VINYL))&&saved.forStyle(Style.COLORED_VINYL)==null,
+        "each album retains the black-only crop after restart");
+   }
+   check(config.forAlbum(new AlbumKey(FramingTarget.BOTH_DISC.name(),null,2026,null)).reel().equals(oldFraming),
+       "confirmation preserves albums outside the edited drafts");
+  }
+  System.out.println("PASS combined cover settings, migration, persistence and independent album framing");
+ }
+
  static void largeAlbumSettingsSaveWithoutBlockingUi()throws Exception{
   Path file=Files.createTempDirectory("disc-large-album-styles").resolve("config.json");
   int count=10_000;
@@ -227,6 +330,7 @@ public class DiscSettingsTest {
   appearanceSurvivesNativeSliderSave();
   orderMigrationAndFailedWrite();
   albumOverridesSurviveRestart();
+  coverFramingSurvivesRestart();
   largeAlbumSettingsSaveWithoutBlockingUi();
   var random=new DiscSettings.ReelRandom();
   DiscSettings.ReelColor previous=null;
