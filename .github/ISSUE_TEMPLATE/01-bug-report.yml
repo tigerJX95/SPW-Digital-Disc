@@ -49,7 +49,7 @@ body:
         请填写 SPW Digital Disc 的版本，可在播放器的插件页面查看。
 
         Enter the SPW Digital Disc version shown on the player’s Plugins page.
-      placeholder: 例如 / e.g. v1.12.0
+      placeholder: 例如 / e.g. v1.13.0
     validations:
       required: true
 

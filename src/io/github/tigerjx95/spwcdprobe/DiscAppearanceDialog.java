@@ -243,7 +243,10 @@ public final class DiscAppearanceDialog implements AutoCloseable {
    palette.add(button);
   }
   colorSection.add(palette,BorderLayout.CENTER);
-  colorSection.add(status,BorderLayout.SOUTH);
+  var colorActions=new JPanel(new BorderLayout(8,0));
+  colorActions.setOpaque(false);
+  colorActions.add(status,BorderLayout.CENTER);
+  colorSection.add(colorActions,BorderLayout.SOUTH);
   fields.add(colorSection);
   fields.add(reelSection);
   fields.add(reelPalette);

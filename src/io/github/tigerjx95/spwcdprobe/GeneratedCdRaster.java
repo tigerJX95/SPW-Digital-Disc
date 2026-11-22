@@ -14,10 +14,10 @@ import org.jetbrains.skia.Surface;
 /** One prepared generated CD, shared by the screen and its reflection. */
 final class GeneratedCdRaster implements AutoCloseable {
  private static final int MAX_SIDE=1536;
- record Key(DiscImage cover,CoverWhiteBorders.Bounds crop,float aspect,int size){
-  static Key of(DiscImage cover,CoverWhiteBorders.Bounds crop,float aspect,float diameter){
+ record Key(DiscImage cover,CoverWhiteBorders.Bounds crop,float aspect,int size,VinylLabelFraming framing){
+  static Key of(DiscImage cover,CoverWhiteBorders.Bounds crop,float aspect,float diameter,VinylLabelFraming framing){
    if(cover==null||!Float.isFinite(diameter)||diameter<=0||diameter>MAX_SIDE)return null;
-   return new Key(cover,crop,aspect,(int)Math.ceil(diameter));
+   return new Key(cover,crop,aspect,(int)Math.ceil(diameter),framing);
   }
  }
  private record Job(Key key,Image pixels){}
@@ -113,9 +113,15 @@ final class GeneratedCdRaster implements AutoCloseable {
    var crop=key.crop();
    int left=crop==null?0:crop.x(),top=crop==null?0:crop.y();
    int width=crop==null?pixels.getWidth():crop.width(),height=crop==null?pixels.getHeight():crop.height();
-   RootRenderer.bakeCd(scope,(target,w,h)->canvas.drawImageRect(pixels,left,top,left+width,top+height,
-       0,0,Math.max(1,Math.round(w)),Math.max(1,Math.round(h)),SamplingMode.Companion.getLINEAR(),null,true),
-       key.aspect(),key.size(),SkiaBackedPath_skikoKt::Path);
+   RootRenderer.Source image=(target,w,h)->canvas.drawImageRect(pixels,left,top,left+width,top+height,
+       0,0,Math.max(1,Math.round(w)),Math.max(1,Math.round(h)),SamplingMode.Companion.getLINEAR(),null,true);
+   var source=new RootRenderer.Source(){
+    @Override public void draw(DrawScope target,float w,float h)throws Exception{image.draw(target,w,h);}
+    @Override public RootRenderer.FramedArtwork discArtwork(){
+     return key.framing()==null?null:new RootRenderer.FramedArtwork(image,key.aspect(),key.framing());
+    }
+   };
+   RootRenderer.bakeCd(scope,source,key.aspect(),key.size(),SkiaBackedPath_skikoKt::Path);
    return surface.makeImageSnapshot();
   }
  }

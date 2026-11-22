@@ -6,8 +6,7 @@ import java.security.MessageDigest;
 import java.util.*;
 import java.util.function.Supplier;
 import net.bytebuddy.jar.asm.*;
-/** Observes the host's final artwork publication, after its current-track check.
- * No image bytes, filename heuristics or independent artwork decoder are used. */
+/** Observes the host's final artwork publication, after its current-track check. */
 final class HostCoverStatus {
  static final String TASK="com.xuncorp.voxzen.service.PlaybackService$updateImageBitmap$2";
  private final Map<Object,CoverAvailability.Ticket> tickets=Collections.synchronizedMap(new WeakHashMap<>());
@@ -75,6 +74,16 @@ final class HostCoverStatus {
   });
  }
  void refreshCurrent()throws Exception{Object value=service.get(null);if(value!=null)refresh.invoke(value);}
+ java.awt.image.BufferedImage labelPreview(String song)throws ReflectiveOperationException{
+  if(!state.available(song)||!Objects.equals(song,current.get()))return null;
+  Object playback=service.get(null);
+  if(playback==null)return null;
+  if(!(bitmap.get(playback) instanceof com.xuncorp.voxzen.image.RefCountedImageBitmap cover))return null;
+  try(var reference=cover.acquire()){
+   var preview=DiscImage.labelPreview(androidx.compose.ui.graphics.SkiaImageAsset_skikoKt.asSkiaBitmap(reference.getBitmap()));
+   return state.available(song)&&Objects.equals(song,current.get())&&bitmap.get(playback)==cover?preview:null;
+  }
+ }
  static void verify(ClassLoader loader,String name,String expected)throws Exception{
   try(var in=loader.getResourceAsStream(name.replace('.','/')+".class")){
    if(in==null||!HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(in.readAllBytes())).equals(expected))throw new IllegalStateException("Artwork interface fingerprint differs: "+name);

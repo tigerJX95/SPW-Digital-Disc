@@ -78,8 +78,41 @@ public class GeneratedDiscFinishTest {
    check((prepared.bitmap.getRGB(0,0)>>>24)==0,"prepared CD corners stay transparent");
    check((prepared.bitmap.getRGB(radius+15,radius)>>>24)==24,"prepared center keeps the transparent film");
   }
-  check(GeneratedCdRaster.Key.of(null,null,1f,400)==null,"missing cover retains the live fallback");
+  var fit=new VinylLabelFraming(VinylLabelFraming.Crop.FULL,true,100,0,0);
+  var live=new RootRasterTest.Raster(side*2,side);
+  var prepared=new RootRasterTest.Raster(diameter,diameter);
+  RootRenderer.paint(live.scope,1,framedSource(live,fit),(s,x,y,d)->false,
+      live::path,1,100,false,null,0,DiscSettings.Style.CD,DiscSettings.VinylColor.BLUE,false);
+  RootRenderer.bakeCd(prepared.scope,framedSource(prepared,fit),1,diameter,prepared::path);
+  check(live.bitmap.getRGB(200,200)==Color.RED.getRGB(),"CD framing does not change the sleeve");
+  check(live.bitmap.getRGB(cx+100,cy)==RootRenderer.CD_FACE_COLOR,"fit shows neutral CD face around the artwork");
+  check(live.bitmap.getRGB(cx,cy-95)==Color.GREEN.getRGB(),"fit draws independent CD artwork");
+  for(int y=8;y<diameter-8;y+=3)for(int x=8;x<diameter-8;x+=3)
+   check(prepared.bitmap.getRGB(x,y)==live.bitmap.getRGB(cx-radius+x,cy-radius+y),"prepared CD matches manual framing");
+  var reel=new RootRasterTest.Raster(side*2,side);
+  RootRenderer.paint(reel.scope,1,framedSource(reel,fit),(s,x,y,d)->false,
+      reel::path,1,100,false,null,0,DiscSettings.Style.REEL_COVER,DiscSettings.VinylColor.BLUE,false);
+  check(reel.bitmap.getRGB(cx+116,cy)==RootRenderer.REEL_FIT_COLOR,"uncovered reel artwork has a neutral backing");
+  check(reel.bitmap.getRGB(cx,cy-98)==Color.GREEN.getRGB(),"fit draws independent reel artwork");
+  check(reel.bitmap.getRGB(cx,cy+110)!=Color.GREEN.getRGB(),"tape window remains visible over the disc artwork");
+  check(reel.bitmap.getRGB(cx,cy)==0,"reel retains its center cutout");
+  check(GeneratedCdRaster.Key.of(null,null,1f,400,null)==null,"missing cover retains the live fallback");
   System.out.println("PASS prepared CD reproduces live CD artwork, spindle and transparency");
+ }
+
+ private static RootRenderer.Source framedSource(RootRasterTest.Raster raster,VinylLabelFraming framing){
+  return new RootRenderer.Source(){
+   public void draw(androidx.compose.ui.graphics.drawscope.DrawScope scope,float w,float h){
+    raster.graphics.setColor(Color.RED);
+    raster.graphics.fill(new Rectangle2D.Float(0,0,w,h));
+   }
+   public RootRenderer.FramedArtwork discArtwork(){
+    return new RootRenderer.FramedArtwork((scope,w,h)->{
+     raster.graphics.setColor(Color.GREEN);
+     raster.graphics.fill(new Rectangle2D.Float(0,0,w,h));
+    },.5f,framing);
+   }
+  };
  }
 
  private static void paintSwatches(RootRasterTest.Raster raster,float width,float height){

@@ -1,0 +1,28 @@
+name: 回归检查
+
+on:
+  push:
+    branches:
+      - '**'
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  core-regression:
+    name: 核心回归
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: 检出源码
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: 运行核心回归测试
+        shell: bash
+        run: |
+          export JAVA_HOME="${JAVA_HOME_25_X64:?JDK 25 is missing from the runner}"
+          python3 tests/test_core.py

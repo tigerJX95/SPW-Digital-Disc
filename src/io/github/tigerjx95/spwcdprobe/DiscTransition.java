@@ -7,8 +7,8 @@ final class DiscTransition {
  record Pose(float exposed,float scale,float centered) {}
  private Phase phase=Phase.IDLE;
  private long started,duration,brakeDuration,coverDuration,openingDuration,coverReturnDuration,coverOverlap;
- private DiscSettings.Speed speed=DiscSettings.Speed.STANDARD;
- void setSpeed(DiscSettings.Speed speed){this.speed=speed;}
+ private DiscSpeed speed=DiscSpeed.STANDARD;
+ void setSpeed(DiscSpeed speed){this.speed=speed;}
  private float exposure,scale=1,closeFrom,centered,closeCentered;
  private float brakeFrom,brakeCentered;
  private double brakeVelocity;

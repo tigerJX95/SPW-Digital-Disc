@@ -22,7 +22,7 @@ public class ContinuousCoverTest {
    if(m.getName().equals("isAttached"))return true;throw new AssertionError(m);
   });
   field(type,"nativeRoot").set(frame,root);
-  var observe=type.getDeclaredMethod("observe",String.class);observe.setAccessible(true);
+  var observe=type.getDeclaredMethod("observe",String.class,DiscSettings.AlbumKey.class);observe.setAccessible(true);
   var resolve=type.getDeclaredMethod("resolveCover",Object.class);resolve.setAccessible(true);
   var drawCover=type.getDeclaredMethod("drawCover",String.class,String.class,float.class);drawCover.setAccessible(true);
   var source=type.getDeclaredMethod("source");source.setAccessible(true);
@@ -43,14 +43,14 @@ public class ContinuousCoverTest {
   sync.invoke(frame,false);
   check(originField.get(frame)==null&&!keepPrimary.getValue(),"leaving the settled page clears the origin");
   originField.set(frame,origin);keepPrimary.setValue(true);
-  observe.invoke(frame,"another album");
+  observe.invoke(frame,"another album",null);
   check(originField.get(frame)==origin,"a track change keeps the same page's layout origin");
   sync.invoke(frame,true);sync.invoke(frame,false);
   var gate=(TrackEntryGate)field(type,"trackGate").get(frame);
   var pass=(MutableState<Object>)field(type,"passPainter").get(frame);
   DiscImage pixels=new DiscImage();Object painter=new HostCoverBridge.Decoded(pixels);
   HostCoverBridge.nodes=List.of(new HostCoverBridge.Image(painter,root,420*420));
-  observe.invoke(frame,"album/0.flac");resolve.invoke(frame,painter);pass.setValue(painter);
+  observe.invoke(frame,"album/0.flac",null);resolve.invoke(frame,painter);pass.setValue(painter);
   field(type,"suppressionApplied").setBoolean(frame,true);
   long now=1_000_000_000L;motion.enter();motion.ready(now);motion.tick(now+940_000_000L);gate.observe("album/0.flac",now);
   for(int i=1;i<=100;i++){
@@ -63,7 +63,7 @@ public class ContinuousCoverTest {
          "playback advanced after native suppression: still paint cover with no outgoing CD");
    var unavailable=(CdPageProbePlugin.DrawCover)drawCover.invoke(frame,outgoing,null,1f);
    check(unavailable.cover()==pixels&&unavailable.exposed()==0f,"unavailable playback retains cover with no CD");
-   observe.invoke(frame,song); // First, the host still exposes the outgoing painter.
+   observe.invoke(frame,song,null); // First, the host still exposes the outgoing painter.
    var waiting=(CdPageProbePlugin.DrawCover)drawCover.invoke(frame,song,song,1f);
    check(waiting.cover()==pixels&&waiting.exposed()==0f,"pending cover cannot show a disc");
    check(field(type,"ownedCover").get(frame)==null,"old cover no longer qualifies as current");
@@ -89,7 +89,7 @@ public class ContinuousCoverTest {
   var availability=(CoverAvailability)field(CdPageProbePlugin.class,"coverAvailability").get(plugin);
   var presentation=type.getDeclaredMethod("resolvePresentation",Object.class);presentation.setAccessible(true);
   Object empty=androidx.compose.ui.graphics.painter.ColorPainter.class.getConstructor(long.class,kotlin.jvm.internal.DefaultConstructorMarker.class).newInstance(androidx.compose.ui.graphics.ColorKt.Color(0xff514c49),null);
-  observe.invoke(frame,"missing");
+  observe.invoke(frame,"missing",null);
   HostCoverBridge.nodes=List.of(new HostCoverBridge.Image(empty,root,420*420));
   check(presentation.invoke(frame,new Object[]{null})==pixels,"unknown loading retains waiting cover");
   var ticket=availability.begin("missing","missing",System.nanoTime());
@@ -101,9 +101,9 @@ public class ContinuousCoverTest {
   HostCoverBridge.nodes=List.of(new HostCoverBridge.Image(recoveredPainter,root,420*420));
   check(presentation.invoke(frame,recoveredPainter)==recoveredPainter&&!field(type,"fallbackActive").getBoolean(frame),"late real cover takes priority");
   pixels=recovered;
-  observe.invoke(frame,"rapid/B");observe.invoke(frame,"rapid/C");
+  observe.invoke(frame,"rapid/B",null);observe.invoke(frame,"rapid/C",null);
   check(field(type,"pendingCover").get(frame)==pixels&&pixels.closes==0,"rapid changes retain one bounded waiting image");
-  observe.invoke(frame,(String)null);check(pixels.closes==1&&pass.getValue()==null,"no current media releases waiting pixels");
+  observe.invoke(frame,(String)null,null);check(pixels.closes==1&&pass.getValue()==null,"no current media releases waiting pixels");
   DiscImage last=new DiscImage();field(type,"pendingCover").set(frame,last);
   restore.invoke(frame);check(last.closes==1&&field(type,"pendingCover").get(frame)==null&&pass.getValue()==null,"page exit releases retained image and restores native layer");
   nativeReturn(ctor.newInstance(plugin));
@@ -228,9 +228,9 @@ public class ContinuousCoverTest {
 
   motion.enter();motion.ready(t);motion.tick(t+940_000_000L);
   field(type,"observedSong").set(frame,"same-album/one.flac");
-  var observe=type.getDeclaredMethod("observe",String.class);observe.setAccessible(true);
+  var observe=type.getDeclaredMethod("observe",String.class,DiscSettings.AlbumKey.class);observe.setAccessible(true);
   var resolve=type.getDeclaredMethod("resolveCover",Object.class);resolve.setAccessible(true);
-  observe.invoke(frame,"same-album/two.flac");
+  observe.invoke(frame,"same-album/two.flac",null);
   var newCover=new HostCoverBridge.Decoded(new DiscImage());
   HostCoverBridge.nodes=List.of(new HostCoverBridge.Image(newCover,root,300*460));
   resolve.invoke(frame,newCover);

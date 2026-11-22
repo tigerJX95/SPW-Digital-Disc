@@ -23,7 +23,10 @@ public class OwnedCoverTest {
    check(resolve.invoke(frame,new Object[]{null})==painter,"native node disappearance cannot revoke current song pixels");
    check(copy.getColor(100,100)==0xffc42637,"independent pixels survive native painter and bitmap disposal");
   }
-  var observe=type.getDeclaredMethod("observe",String.class);observe.setAccessible(true);observe.invoke(frame,"song B");
+  var preview=owned.labelPreview();
+  check(preview!=null&&preview.getWidth()==480&&preview.getHeight()==240&&preview.getRGB(100,100)==0xffc42637,
+      "visible cover supplies a correctly scaled and colored preview after the host painter closes");
+  var observe=type.getDeclaredMethod("observe",String.class,DiscSettings.AlbumKey.class);observe.setAccessible(true);observe.invoke(frame,"song B",null);
   check(field(type,"ownedCover").get(frame)==null&&field(type,"pendingCover").get(frame)==owned&&!copy.isClosed(),"track change moves snapshot to visual-only waiting state");
   check(resolve.invoke(frame,new Object[]{null})==owned&&!HostCoverBridge.imageReady(owned),"waiting pixels are not decoded new-track readiness");
   var clear=type.getDeclaredMethod("clearCover");clear.setAccessible(true);clear.invoke(frame);

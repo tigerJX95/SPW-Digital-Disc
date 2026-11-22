@@ -21,7 +21,7 @@ public class DiscRotationTest {
   near(r.sample("c",true,true,true,t+30_000_000_000L),0,"first ready frame upright");
   near(r.sample("c",true,true,true,t+35_000_000_000L),87.84f,"ready resumes");
   r.reset();
-  long fast=DiscSettings.Speed.FAST.rotationPeriod,slow=DiscSettings.Speed.SLOW.rotationPeriod;
+  long fast=DiscSpeed.FAST.rotationPeriod,slow=DiscSpeed.SLOW.rotationPeriod;
   r.sample("speed",true,true,true,t,fast);
   near(r.sample("speed",true,true,true,t+3_120_000_000L,slow),90,"speed change integrates old rate up to the change");
   near(r.sample("speed",true,true,true,t+10_620_000_000L,slow),180,"new rate continues from same angle");

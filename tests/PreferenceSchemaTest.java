@@ -8,7 +8,7 @@ public class PreferenceSchemaTest {
   var parser=Class.forName(TestHost.parser()).getMethod("\u037f",String.class);
   var groups=(List<?>)parser.invoke(null,Files.readString(Path.of("plugin/preference_config.json")));
   check(groups.size()==1,"one native settings group");Object group=groups.get(0);
-  var items=(List<?>)group.getClass().getMethod("ԩ").invoke(group);check(items.size()==9,"exposure slider, two switches, three buttons and three lists");
+  var items=(List<?>)group.getClass().getMethod("ԩ").invoke(group);check(items.size()==9,"exposure slider, two switches, four buttons and two lists");
   Object slider=items.get(0);var type=slider.getClass();check(type.getName().equals(TestHost.model()+"$Ԫ"),"host recognizes actual seekbar model");
   check(type.getMethod("\u037f").invoke(slider).equals(DiscExposure.KEY),"schema and runtime use same key");
   check(type.getMethod("Ԭ").invoke(slider).equals("config.json"),"schema and runtime use same file");
@@ -45,9 +45,9 @@ public class PreferenceSchemaTest {
   check(java.lang.reflect.Modifier.isStatic(method.getModifiers()),"callback is public and static");
   method.invoke(null); // Host may open settings even while the plugin is stopped.
   Object trim=items.get(8);var trimType=trim.getClass();
-  check(trimType.getMethod("Ϳ").invoke(trim).equals(DiscSettings.TRIM_COVER_KEY),"trim mode key");
-  check(trimType.getMethod("ԫ").invoke(trim).equals(List.of("OFF","PAIRED","RIGHT")),"mutually exclusive trim modes");
-  check(trimType.getMethod("Ԭ").invoke(trim).equals("OFF"),"trim defaults off");
+  check(trimType==button,"native cover framing button model");
+  check(trimType.getMethod("Ԫ").invoke(trim).equals(CoverFramingDialog.class.getName()+".open"),"cover framing callback");
+  CoverFramingDialog.class.getMethod("open").invoke(null);
   var file=Files.createTempFile("spw-trim-test",".json");
   try{
    Files.writeString(file,"{}");
@@ -93,6 +93,6 @@ public class PreferenceSchemaTest {
   check(new CoverWhiteBorders.Bounds(0,20,100,60).displayAspect()>1.6f,"thick border preserves landscape");
   check(CoverWhiteBorders.find(100,100,(x,y)->x<19||x>=81?(y==50?0xff444444:0xffeeeeee):0xff224466)
       .equals(new CoverWhiteBorders.Bounds(19,0,62,100)),"near-white edge tolerates isolated noise");
-  System.out.println("PASS actual SPW preference_config.json parser: seekbar, two switches, three buttons and three lists, matching keys/file, 0-100 bounds/default50 and all switches default off");
+  System.out.println("PASS actual SPW preference_config.json parser: seekbar, two switches, four buttons and two lists, matching keys/file, 0-100 bounds/default50 and all switches default off");
  }
 }

@@ -12,7 +12,7 @@ public class ProductionRotationHandoffTest {
   var plugin=new CdPageProbePlugin(new PluginContext("test","1.2.0-test2",".","1.19.0",Channel.MS));
   var type=Class.forName(CdPageProbePlugin.class.getName()+"$Frame");
   var constructor=type.getDeclaredConstructors()[0];constructor.setAccessible(true);
-  var observe=type.getDeclaredMethod("observe",String.class);observe.setAccessible(true);
+  var observe=type.getDeclaredMethod("observe",String.class,DiscSettings.AlbumKey.class);observe.setAccessible(true);
   var close=type.getDeclaredMethod("closeMotion",long.class,Runnable.class,boolean.class);close.setAccessible(true);
   var sync=type.getDeclaredMethod("syncVisibility",boolean.class);sync.setAccessible(true);
   var restore=type.getDeclaredMethod("restoreNative");restore.setAccessible(true);
@@ -22,7 +22,7 @@ public class ProductionRotationHandoffTest {
    var angle=(MutableState<Float>)field(frame,"rotationAngle");
    var motion=(DiscTransition)field(frame,"motion");
    var pose=(MutableState<DiscTransition.Pose>)field(frame,"pose");
-   observe.invoke(frame,"a");
+   observe.invoke(frame,"a",null);
    long t=1_000_000_000L;motion.trackChanged();motion.trackReady(t);motion.tick(t+700_000_000L);
    rotation.sample("a",true,true,true,t+700_000_000L);
    angle.setValue(rotation.sample("a",true,true,true,t+1_700_000_000L));
@@ -41,7 +41,7 @@ public class ProductionRotationHandoffTest {
    }
    check(completed.get()==1&&motion.finished(),"single return after motion completion");
    // Source observation may run before the next animation timer or draw.
-   observe.invoke(frame,"b");check(angle.getValue()==0,"new source clears cached angle synchronously");
+   observe.invoke(frame,"b",null);check(angle.getValue()==0,"new source clears cached angle synchronously");
    check(rotation.sample("b",true,true,false,t+4_000_000_000L)==0,"new disc waits upright");
    sync.invoke(frame,true);
    rotation.sample("b",true,true,true,t+4_000_000_000L);
