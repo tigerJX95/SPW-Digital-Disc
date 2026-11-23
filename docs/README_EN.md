@@ -148,9 +148,11 @@ Only the disc rotates; the cover stays upright and the reflection shares the ang
 
 Offline checks cover single-album trimming, album search, preview and status text during asynchronous cover switching, framing drafts, settings persistence, and Chinese input events. Pushes and pull requests run the [core regression checks](../tests/FIRST_REVEAL.md).
 
-| SPW host | Offline regression |
-| --- | --- |
-| 1.19.3 Microsoft Store | 55 tests passed |
+| Platform | SPW channel | Verification result |
+| --- | --- | --- |
+| Windows | Microsoft Store (1.19.3) | 55 offline regression tests passed |
+| Windows | Steam | Passed hands-on testing |
+| Ubuntu Linux | Steam | Passed hands-on testing |
 
 Offline tests cover interface resolution, cover calls, configuration storage, images, animations and rotation state. They do not run Windows native playback or Skia rendering. Startup verifies playback-controller and sheet-state fingerprints, then locates the cover entry, caller and sheet-state accessor using metadata, signatures and a unique call relationship. The cover painter must be the unique structural match and pass an implementation fingerprint normalized for its own obfuscated identifiers and debug metadata. Discovery results are cached per host class loader. Missing or ambiguous targets prevent activation with a detailed error. Startup also validates playback and artwork-loading interfaces and rejects incompatible hosts. If playback state cannot be read during operation, rotation stops and a warning is logged.
 
