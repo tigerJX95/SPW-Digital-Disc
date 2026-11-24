@@ -64,6 +64,8 @@ public class HostEntryTest {
   });
   int layer=order.indexOf("BlockGraphicsLayerElement"),click=order.indexOf("ClickableElement");
   if(layer<0||click<=layer)throw new AssertionError("The click target must follow the translated Canvas: "+order);
+  if(CanvasWidget.hover(widget,point->{},()->{})==widget)
+   throw new AssertionError("the actual desktop host can attach a passive pointer modifier");
   if(CanvasWidget.hasDrawingLayer(null)||CanvasWidget.requestDraw(null))
    throw new AssertionError("An unmounted Disc Canvas must tolerate redraw requests");
   System.out.println("PASS real Box ABI and independently-sized, clickable Disc Canvas with its own recording layer");

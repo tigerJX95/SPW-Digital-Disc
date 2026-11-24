@@ -13,6 +13,7 @@ final class DiscTransition {
  private float brakeFrom,brakeCentered;
  private double brakeVelocity;
  private boolean pageEntry;
+ private long coverLeadNs;
  private float returnScale,returnCentered;
  private Runnable completion;
  Phase phase(){return phase;}
@@ -20,8 +21,9 @@ final class DiscTransition {
  boolean closing(){return phase==Phase.CLOSING;}
  boolean finished(){return phase==Phase.FINISHED;}
  boolean pageEntryAnimating(){return pageEntry&&(phase==Phase.COVER||phase==Phase.OPENING);}
- void enter(){reset();phase=Phase.WAITING;scale=COVER_START_SCALE;centered=1;pageEntry=true;}
- void ready(long now){if(phase==Phase.WAITING){phase=Phase.COVER;started=now;coverDuration=speed.duration(240_000_000L);openingDuration=speed.duration(700_000_000L);}}
+ void enter(){reset();phase=Phase.WAITING;coverLeadNs=240_000_000L;scale=COVER_START_SCALE;centered=1;pageEntry=true;}
+ void enterFromPlaybackBar(){enter();coverLeadNs=100_000_000L;}
+ void ready(long now){if(phase==Phase.WAITING){phase=Phase.COVER;started=now;coverDuration=speed.duration(coverLeadNs);openingDuration=speed.duration(700_000_000L);}}
  void trackChanged(){
   if(closing()||finished())return;
   phase=Phase.TRACK_WAIT;exposure=0;scale=1;centered=0;pageEntry=false;completion=null;

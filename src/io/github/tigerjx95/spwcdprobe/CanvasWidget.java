@@ -4,10 +4,12 @@ import androidx.compose.foundation.layout.*;
 import androidx.compose.foundation.ClickableKt;
 import androidx.compose.ui.graphics.GraphicsLayerModifierKt;
 import androidx.compose.ui.graphics.GraphicsLayerScope;
+import androidx.compose.ui.input.pointer.PointerMoveFilter_desktopKt;
 import androidx.compose.ui.layout.LayoutCoordinates;
 import androidx.compose.ui.node.NodeCoordinator;
 import androidx.compose.ui.unit.*;
 import java.lang.reflect.Method;
+import java.util.function.LongConsumer;
 import kotlin.Unit;
 import kotlin.jvm.functions.Function0;
 import kotlin.jvm.functions.Function1;
@@ -35,6 +37,14 @@ final class CanvasWidget {
   // moves with the cover and the disc.
   Modifier layer=GraphicsLayerModifierKt.graphicsLayer(sized,layerTransform);
   return (Modifier)CLICK.invoke(null,layer,null,null,true,null,null,click);
+ }
+ @SuppressWarnings("deprecation")
+ static Modifier hover(Modifier modifier,LongConsumer move,Runnable leave){
+  // Hover is optional on a desktop host. Keep the existing clickable modifier on older clients.
+  try{return PointerMoveFilter_desktopKt.pointerMoveFilter(modifier,
+      point->{move.accept(point.getPackedValue());return false;},
+      ()->{leave.run();return false;},()->false);}
+  catch(LinkageError unavailable){return modifier;}
  }
  static boolean hasDrawingLayer(LayoutCoordinates coordinates){
   return coordinates instanceof NodeCoordinator coordinator&&coordinator.isAttached()

@@ -72,7 +72,7 @@ final class LocalDiscService<T extends AutoCloseable> implements AutoCloseable {
  static Path directory(String song){
   Path audio=audioPath(song);return audio==null||!Files.isRegularFile(audio,NOFOLLOW_LINKS)?null:audio.getParent();
  }
- private static Path audioPath(String song){
+ static Path audioPath(String song){
   if(song==null||song.isBlank())return null;
   try{
    Path file;

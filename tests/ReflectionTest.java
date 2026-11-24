@@ -34,6 +34,7 @@ public class ReflectionTest {
   verifyClippedDiscSkip(paint);
   verifyReturnReflection(reflection);
   verifySharedCoverCorners(reflection);
+  verifyHoverScope(reflection);
   var preview=new RootRasterTest.Raster(RenderWarmup.WIDTH,RenderWarmup.HEIGHT);
   var appearance=new DiscSettings.Appearance(DiscSettings.Style.CD,DiscSettings.VinylColor.BLUE);
   RenderWarmup.draw(preview.scope,preview::path,preview::source,new ReflectionRenderer(()->paint),appearance);
@@ -44,6 +45,23 @@ public class ReflectionTest {
   System.out.println("PASS offscreen warmup draw sequence: cover, generated artwork and reflection");
   System.out.println("PASS production ReflectionRenderer + RootRenderer: mirrored cover and CD silhouette, 18% layer, vertical fade, transparent gap/outside, fully restored Canvas");
   System.out.println("Actual host gradient Brush used with Java2D Canvas/Paint adapter; Windows compositing awaits real-machine validation.");
+ }
+ private static void verifyHoverScope(ReflectionRenderer reflection)throws Exception{
+  var r=new RootRasterTest.Raster(840,488);
+  var coverLayer=new RootRenderer.CoverLayer();
+  coverLayer.tilt=new CoverHover.Tilt(.85f,-.65f);
+  int[] calls={0};
+  RootRenderer.Disc disc=(scope,x,y,d)->{
+   check(r.graphics.getTransform().getScaleX()==1,"the sleeve perspective does not affect disc geometry");
+   calls[0]++;return false;
+  };
+  ReflectionRenderer.Content draw=()->RootRenderer.paint(r.scope,1,r::source,disc,r::path,
+      1,100,true,FrontRendererTest.layer(),0,DiscSettings.Style.CD,DiscSettings.VinylColor.BLACK,false,
+      DiscSettings.ReelColor.DEFAULT,coverLayer,12);
+  draw.draw();
+  reflection.draw(r.scope,420,840,64,4,draw);
+  check(r.perspectiveTransforms==2&&calls[0]==2,"main and reflected sleeves receive one hover transform each");
+  check(r.saved.isEmpty()&&r.graphics.getTransform().isIdentity(),"hover restores the surrounding canvas transform");
  }
  private static void verifyReturnReflection(ReflectionRenderer renderer)throws Exception{
   int side=420, width=630, shortFade=64, gap=4;
@@ -86,7 +104,7 @@ public class ReflectionTest {
   int side=420;
   for(float scale:new float[]{1f,.8f,.6f})for(float aspect:new float[]{.75f,1f,1.5f}){
    var r=new RootRasterTest.Raster(630,650);
-   var corners=new RootRenderer.CoverCorners();
+   var corners=new RootRenderer.CoverLayer();
    float density=1.25f, radius=CoverHandoff.coverCornerRadius(scale,density);
    check(Math.abs(radius*scale-15f)<.001f,"expanded, moving and native-size covers share the same on-screen rounding");
    r.graphics.scale(scale,scale);

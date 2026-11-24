@@ -10,7 +10,10 @@ import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.Future;
 import java.util.function.Consumer;
 import java.util.function.LongSupplier;
+import org.jetbrains.skia.FilterMipmap;
+import org.jetbrains.skia.FilterMode;
 import org.jetbrains.skia.Image;
+import org.jetbrains.skia.MipmapMode;
 import org.jetbrains.skia.SamplingMode;
 import org.jetbrains.skia.Surface;
 
@@ -133,8 +136,8 @@ final class DiscSurfaceRaster<C extends Enum<C>> implements AutoCloseable {
   try(var fixed=Surface.Companion.makeRasterN32Premul(SIZE,SIZE);
       var rotating=Surface.Companion.makeRasterN32Premul(SIZE,SIZE)){
    RootRenderer.bakeSolidReel(rasterScope(fixed),rasterScope(rotating),SIZE*.5f,SkiaBackedPath_skikoKt::Path,color);
-   var base=new ImageRaster(fixed.makeImageSnapshot());
-   try{return new ReelLayers(base,new ImageRaster(rotating.makeImageSnapshot()));}
+   var base=new ImageRaster(fixed.makeImageSnapshot(),false);
+   try{return new ReelLayers(base,new ImageRaster(rotating.makeImageSnapshot(),true));}
    catch(RuntimeException|LinkageError unavailable){base.close();throw unavailable;}
   }
  }
@@ -142,7 +145,7 @@ final class DiscSurfaceRaster<C extends Enum<C>> implements AutoCloseable {
  private static Raster bakeImage(Painter painter)throws Exception{
   try(var surface=Surface.Companion.makeRasterN32Premul(SIZE,SIZE)){
    painter.draw(rasterScope(surface));
-   return new ImageRaster(surface.makeImageSnapshot());
+   return new ImageRaster(surface.makeImageSnapshot(),true);
   }
  }
 
@@ -178,12 +181,14 @@ final class DiscSurfaceRaster<C extends Enum<C>> implements AutoCloseable {
   }
  }
 
- private record ImageRaster(Image image) implements Raster {
+ private record ImageRaster(Image image,boolean mipmapped) implements Raster {
+  private static final SamplingMode MINIFICATION=new FilterMipmap(FilterMode.LINEAR,MipmapMode.LINEAR);
   @Override public void draw(DrawScope scope,float x,float y,float diameter){
    var canvas=SkiaBackedCanvas_skikoKt.getNativeCanvas(scope.getDrawContext().getCanvas());
    float radius=diameter*.5f;
+   // The whole image is the source. Strict subrect sampling disables mipmaps.
    canvas.drawImageRect(image,0,0,SIZE,SIZE,x-radius,y-radius,x+radius,y+radius,
-       SamplingMode.Companion.getLINEAR(),null,true);
+       mipmapped?MINIFICATION:SamplingMode.Companion.getLINEAR(),null,!mipmapped);
   }
   @Override public void close(){image.close();}
  }

@@ -11,7 +11,7 @@ import org.jetbrains.skia.Image;
 import org.jetbrains.skia.SamplingMode;
 import org.jetbrains.skia.Surface;
 
-/** One prepared generated CD, shared by the screen and its reflection. */
+/** One prepared CD artwork layer, shared by the screen and its reflection. */
 final class GeneratedCdRaster implements AutoCloseable {
  private static final int MAX_SIDE=1536;
  record Key(DiscImage cover,CoverWhiteBorders.Bounds crop,float aspect,int size,VinylLabelFraming framing){
@@ -121,7 +121,7 @@ final class GeneratedCdRaster implements AutoCloseable {
      return key.framing()==null?null:new RootRenderer.FramedArtwork(image,key.aspect(),key.framing());
     }
    };
-   RootRenderer.bakeCd(scope,source,key.aspect(),key.size(),SkiaBackedPath_skikoKt::Path);
+   RootRenderer.bakeCdArtwork(scope,source,key.aspect(),key.size(),SkiaBackedPath_skikoKt::Path);
    return surface.makeImageSnapshot();
   }
  }

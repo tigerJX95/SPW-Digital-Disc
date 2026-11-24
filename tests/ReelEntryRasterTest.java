@@ -13,6 +13,7 @@ final class ReelEntryRasterTest {
  public static void main(String[] args)throws Exception{
   compareArtwork();
   compareCachedTape();
+  checkLateTape();
   retryTemporaryFailure();
   var firstStarted=new CountDownLatch(1);
   var finishFirst=new CountDownLatch(1);
@@ -99,7 +100,12 @@ final class ReelEntryRasterTest {
  private static void compareCachedTape()throws Exception{
   int side=400,radius=196;
   var tape=new RootRasterTest.Raster(side*2,side);
-  RootRenderer.bakeReelTape(tape.scope,radius,tape::path);
+  var paths=new AtomicInteger();
+  RootRenderer.bakeReelTape(tape.scope,radius,()->{
+   paths.incrementAndGet();
+   return tape.path();
+  });
+  check(paths.get()==2,"tape preparation builds only the two winding paths");
   for(var style:new DiscSettings.Style[]{DiscSettings.Style.REEL,DiscSettings.Style.REEL_COVER}){
    for(float angle:new float[]{0,30}){
     var live=new RootRasterTest.Raster(side*2,side);
@@ -127,6 +133,31 @@ final class ReelEntryRasterTest {
    }
   }
   System.out.println("PASS cached tape covers both reel styles during reveal and rotation");
+ }
+
+ private static void checkLateTape()throws Exception{
+  var reports=new LinkedBlockingQueue<String>();
+  var draws=new AtomicInteger();
+  var plugin=new CdPageProbePlugin(new PluginContext("test","1.14.0",".","1.19.3",Channel.MS));
+  var type=Class.forName(CdPageProbePlugin.class.getName()+"$Frame");
+  var constructor=type.getDeclaredConstructors()[0];
+  constructor.setAccessible(true);
+  var frame=constructor.newInstance(plugin);
+  var draw=type.getDeclaredMethod("drawPreparedReelTape",DiscSurfaceRaster.class,DrawScope.class,float.class);
+  draw.setAccessible(true);
+  try(var cache=new DiscSurfaceRaster<DiscSettings.ReelColor>(color->new DiscSurfaceRaster.Raster(){
+   public void draw(DrawScope scope,float x,float y,float diameter){draws.incrementAndGet();}
+   public void close(){}
+  },reports::offer,System::nanoTime,"REEL_TAPE_RASTER")){
+   check(!(boolean)draw.invoke(frame,cache,null,196f),"first draw chooses live tape if the raster is pending");
+   cache.prepare(DEFAULT);
+   check(reports.poll(3,TimeUnit.SECONDS)!=null&&cache.ready(DEFAULT,392),"the tape raster becomes available");
+   check(!(boolean)draw.invoke(frame,cache,null,196f)&&draws.get()==0,
+       "a late raster must not replace the live tape during a reveal");
+   var next=constructor.newInstance(plugin);
+   check((boolean)draw.invoke(next,cache,null,196f)&&(boolean)draw.invoke(next,cache,null,196f)&&draws.get()==2,
+       "the next reveal shares one prepared tape for the reel and reflection");
+  }
  }
 
  private static void compareArtwork()throws Exception{

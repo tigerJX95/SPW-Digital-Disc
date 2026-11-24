@@ -14,6 +14,7 @@ TESTS = (
     "TrackEntryGateTest",
     "DiscRotationTest",
     "CoverSelectionTest",
+    "CoverHoverTest",
     "CoverRecoveryTest",
     "VinylLabelFramingTest",
     "DiscArtworkTest",

@@ -81,6 +81,7 @@ final class DiscSettings implements AutoCloseable {
   Style(String label){this.label=label;}
   boolean reel(){return this==REEL||this==REEL_COVER;}
   boolean vinyl(){return this==BLACK_VINYL||this==COLORED_VINYL;}
+  Style forMissingCover(boolean missing){return missing?CD:this;}
  }
  enum ArtworkKind { CUSTOM, GENERATED, UNKNOWN }
  record ArtworkSource(String description,ArtworkKind kind){
