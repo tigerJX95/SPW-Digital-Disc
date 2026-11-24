@@ -61,7 +61,96 @@ final class EntryTimingTest {
   if(series.begin(ms(600))==null)throw new AssertionError("a subsequent style change must rearm the timing");
   verifyComposeFrames();
   verifyTimerHandoff();
+  verifyHoverClock();
   System.out.println("PASS: entry timing reports the largest draw and clock gaps independently");
+ }
+
+ private static void verifyHoverClock()throws Exception{
+  javax.swing.SwingUtilities.invokeAndWait(()->{
+   try{
+    var plugin=new CdPageProbePlugin(new com.xuncorp.spw.workshop.api.PluginContext(
+        "test","1.14.0",".","1.19.3",com.xuncorp.spw.workshop.api.Channel.MS));
+    field(plugin,"running").setBoolean(plugin,true);
+    var type=Class.forName(CdPageProbePlugin.class.getName()+"$Frame");
+    var constructor=type.getDeclaredConstructors()[0];
+    constructor.setAccessible(true);
+    var frame=constructor.newInstance(plugin);
+    @SuppressWarnings("unchecked") var ready=(androidx.compose.runtime.MutableState<Boolean>)field(frame,"ready").get(frame);
+    @SuppressWarnings("unchecked") var painter=(androidx.compose.runtime.MutableState<Object>)field(frame,"passPainter").get(frame);
+    var request=(androidx.compose.runtime.State<?>)field(frame,"hoverFrameRequest").get(frame);
+    var tilt=(androidx.compose.runtime.State<?>)field(frame,"coverTilt").get(frame);
+    ready.setValue(true);
+    painter.setValue(new Object());
+    var motion=(DiscTransition)field(frame,"motion").get(frame);
+    motion.trackChanged();motion.trackReady(ms(1));motion.tick(ms(701));
+    var hover=(CoverHover)field(frame,"coverHover").get(frame);
+    hover.bounds(0,0,400,400);
+    var pointer=type.getDeclaredMethod("moveCoverPointer",long.class);pointer.setAccessible(true);
+    var leave=type.getDeclaredMethod("leaveCoverPointer");leave.setAccessible(true);
+    var timer=type.getDeclaredMethod("advanceCoverHover",long.class);timer.setAccessible(true);
+    var drive=type.getDeclaredMethod("driveHoverFrames",Object.class,Continuation.class);drive.setAccessible(true);
+    var sample=type.getDeclaredMethod("sampleCoverHover",long.class);sample.setAccessible(true);
+
+    pointer.invoke(frame,RootRenderer.pack(200,200));
+    if(request.getValue()!=null)throw new AssertionError("a stationary center does not request frames");
+    pointer.invoke(frame,RootRenderer.pack(350,50));
+    Object first=request.getValue();
+    if(first==null)throw new AssertionError("pointer movement requests deferred drawing");
+    var entering=tilt.getValue();
+    long last=field(frame,"lastHoverFrame").getLong(frame);
+    timer.invoke(frame,last+ms(16));
+    if(tilt.getValue()!=entering)throw new AssertionError("timer leaves the healthy Compose clock in charge");
+    var clock=new BroadcastFrameClock();
+    drive.invoke(frame,first,new Completion(clock));
+    clock.sendFrame(System.nanoTime());
+    var drawn=(CoverHover.Tilt)tilt.getValue();
+    if(drawn.x()<=0||drawn.y()>=0||!clock.getHasAwaiters())throw new AssertionError("Compose advances the pointer tilt");
+    last=field(frame,"lastHoverFrame").getLong(frame);
+    timer.invoke(frame,last+ms(24));
+    if(tilt.getValue()!=drawn)throw new AssertionError("the timer cannot advance a healthy Compose burst");
+
+    leave.invoke(frame);
+    if(request.getValue()!=first)throw new AssertionError("pointer updates share the active frame loop");
+    for(int step=1;step<=44;step++)sample.invoke(frame,last+ms(step*16));
+    if(request.getValue()!=null||tilt.getValue()!=CoverHover.Tilt.FLAT)
+     throw new AssertionError("leaving returns to flat and releases the request");
+    pointer.invoke(frame,RootRenderer.pack(40,360));
+    Object second=request.getValue();
+    if(second==null||second==first)throw new AssertionError("motion restarts even before the old effect is disposed");
+    var beforeStale=tilt.getValue();
+    clock.sendFrame(System.nanoTime());
+    if(clock.getHasAwaiters()||tilt.getValue()!=beforeStale)
+     throw new AssertionError("a stale Compose callback cannot draw a new request");
+
+    drive.invoke(frame,second,new Completion(EmptyCoroutineContext.INSTANCE));
+    last=field(frame,"lastHoverFrame").getLong(frame);
+    timer.invoke(frame,last+ms(16));
+    if(((CoverHover.Tilt)tilt.getValue()).x()>=0)throw new AssertionError("missing frame clock falls back to the timer");
+
+    sample.invoke(frame,last+ms(650));
+    pointer.invoke(frame,RootRenderer.pack(360,40));
+    if(request.getValue()!=null||Math.abs(((CoverHover.Tilt)tilt.getValue()).x()-.8f)>.001f)
+     throw new AssertionError("settled movement publishes the reversed pointer direction in the input callback");
+
+    var reset=type.getDeclaredMethod("resetCoverHover");reset.setAccessible(true);
+    reset.invoke(frame);
+    hover.bounds(0,0,400,400);
+    pointer.invoke(frame,RootRenderer.pack(355,40));
+    Object third=request.getValue();
+    var stalled=new BroadcastFrameClock();
+    drive.invoke(frame,third,new Completion(stalled));
+    last=field(frame,"lastHoverFrame").getLong(frame);
+    timer.invoke(frame,last+ms(80));
+    drawn=(CoverHover.Tilt)tilt.getValue();
+    stalled.sendFrame(System.nanoTime());
+    if(drawn.x()<=0||tilt.getValue()!=drawn||stalled.getHasAwaiters())
+     throw new AssertionError("a stalled Compose clock yields exclusively to the timer");
+    reset.invoke(frame);
+    if(request.getValue()!=null||tilt.getValue()!=CoverHover.Tilt.FLAT)
+     throw new AssertionError("clearing a cover cancels hover and its pending redraw");
+   }catch(ReflectiveOperationException failure){throw new AssertionError(failure);}
+  });
+  System.out.println("PASS: on-demand Compose hover frames, idle release, stale-frame rejection and exclusive timer fallback");
  }
 
  private static void verifyTimerHandoff()throws Exception{

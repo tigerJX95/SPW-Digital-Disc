@@ -1,6 +1,9 @@
 package io.github.tigerjx95.spwcdprobe;
 
+import androidx.compose.ui.graphics.drawscope.DrawScope;
 import java.awt.Color;
+import java.awt.RenderingHints;
+import java.awt.geom.AffineTransform;
 import java.awt.geom.Rectangle2D;
 
 /** Exercises the real generated-disc renderer; no native Skia backend needed. */
@@ -25,7 +28,7 @@ public class GeneratedDiscFinishTest {
    // The Java2D adapter is aliased: a subpixel spindle at small rotated
    // sizes can fall between samples. Larger fixtures verify actual pixels.
    if(side>=420)check(spindle,"small white spindle retained at subpixel centers");
-   check(raster.circles==9,"white rim, layered hub and original white spindle");
+   check(raster.circles==9,"optical rim, layered hub and original white spindle");
    check(raster.bitmap.getRGB(side*2-1,Math.round(cy))==0,"rim stays inside original disc bounds");
    if((color>>>24)==255)check(raster.bitmap.getRGB(side/2,side/2)==color,"cover is unaffected");
    // Opaque artwork away from the hub and narrow rim must be byte-identical.
@@ -47,7 +50,9 @@ public class GeneratedDiscFinishTest {
   check(middle>80&&middle<150&&inner>middle+20&&outer>middle+20&&inner<250&&outer<255,"two defined silver bevels around a lightly translucent hub field");
   var dark=render(420,0xff101820,false,0);
   int rim=dark.bitmap.getRGB(center+radius-2,210);
-  check((rim>>>16&255)>220&&(rim>>>8&255)>220&&(rim&255)>220,"reference-inspired white outer edge is visible on dark artwork");
+  int rimLight=rim>>8&255;
+  check(rimLight>220,"the original bright white rim is visible on dark artwork");
+  check(dark.bitmap.getRGB(center+radius-5,210)==0xff101820,"narrow rim leaves artwork near the edge intact");
   for(float progress:new float[]{.25f,.5f,.75f,1}){
    var moving=new RootRasterTest.Raster(840,420);
    RootRenderer.paint(moving.scope,1,(s,w,h)->{},(s,x,y,d)->false,moving::path,progress,100,true,FrontRendererTest.layer(),0);
@@ -61,7 +66,62 @@ public class GeneratedDiscFinishTest {
    check(local.circles==0,"local PNG/JPG bypasses all generated finishing");
   }
   checkPreparedArtwork();
+  checkRotatingRim();
+  checkCoverCdHub();
   System.out.println("PASS generated finish: "+cases+" size/color/layer/rotation cases, unchanged artwork body and cover, translucent hole, white spindle, bounded rim, translucent annulus and untouched local artwork");
+ }
+ // Exercise the shared compositor with the shipped texture on the Java2D canvas adapter.
+ private static void checkCoverCdHub()throws Exception{
+  var texture=javax.imageio.ImageIO.read(new java.io.File("plugin/cd-material/hub.png"));
+  var bitmap=(androidx.compose.ui.graphics.ImageBitmap)java.lang.reflect.Proxy.newProxyInstance(
+      GeneratedDiscFinishTest.class.getClassLoader(),new Class[]{androidx.compose.ui.graphics.ImageBitmap.class},
+      (p,m,a)->switch(m.getName()){
+       case "getWidth" -> texture.getWidth();
+       case "getHeight" -> texture.getHeight();
+       default -> throw new AssertionError(m);
+      });
+  int side=600,cx=900,cy=300;
+  float radius=side*.49f;
+  for(boolean cached:new boolean[]{false,true})for(float angle:new float[]{0,37,193}){
+   var base=new RootRasterTest.Raster(side*2,side);
+   var glazed=new RootRasterTest.Raster(side*2,side);
+   for(var view:new RootRasterTest.Raster[]{base,glazed}){
+    view.images.put(bitmap,texture);
+    var disc=new RootRenderer.Disc(){
+     public boolean draw(DrawScope scope,float x,float y,float d){return false;}
+     public androidx.compose.ui.graphics.ImageBitmap coverCdHub(){return view==glazed?bitmap:null;}
+     public boolean drawCoverCd(DrawScope scope,float x,float y,float d){
+      if(cached){
+       view.graphics.setColor(Color.DARK_GRAY);
+       view.graphics.fill(new Rectangle2D.Float(x-d/2,y-d/2,d,d));
+      }
+      return cached;
+     }
+    };
+    RootRenderer.paint(view.scope,1,(scope,w,h)->paintSwatches(view,w,h),disc,view::path,1,100,false,null,angle);
+   }
+   int ridge=0,field=0;
+   for(int y=0;y<side;y++)for(int x=side;x<side*2;x++){
+    int before=base.bitmap.getRGB(x,y),after=glazed.bitmap.getRGB(x,y);
+    double dx=(x+.5-cx)/radius,dy=(y+.5-cy)/radius;
+    double r=Math.hypot(dx,dy);
+    if(before!=after){
+     check(r>.123&&r<.207,"glaze must stay between the hole and the original silver rim");
+     if(r>.128&&r<.142)ridge++;
+     if(r>.15&&r<.19)field++;
+    }
+    if(r>.128&&r<.20){
+     int tx=(int)((dx/.42+.5)*texture.getWidth()),ty=(int)((dy/.42+.5)*texture.getHeight());
+     int texel=texture.getRGB(tx,ty);
+     double alpha=(texel>>>24)/255.;
+     double expected=(before&255)*(1-alpha)+(texel&255)*alpha;
+     check(Math.abs((after&255)-expected)<4,"hub light must stay fixed through artwork rotation");
+    }
+   }
+   check(ridge>200&&field>1000,"both the raised inner lip and curved reflection must be visible");
+   base.graphics.dispose();glazed.graphics.dispose();
+  }
+  System.out.println("PASS curved CD hub and shallow relief: live and cached art, fixed lighting at three angles");
  }
  private static void checkPreparedArtwork()throws Exception{
   int side=400,radius=196,diameter=radius*2,cx=600,cy=200;
@@ -70,12 +130,14 @@ public class GeneratedDiscFinishTest {
    var prepared=new RootRasterTest.Raster(diameter,diameter);
    RootRenderer.paint(live.scope,aspect,(scope,w,h)->paintSwatches(live,w,h),(s,x,y,d)->false,
        live::path,1,100,false,null,0,DiscSettings.Style.CD,DiscSettings.VinylColor.BLUE,false);
-   RootRenderer.bakeCd(prepared.scope,(scope,w,h)->paintSwatches(prepared,w,h),aspect,diameter,prepared::path);
-   for(int y=8;y<diameter-8;y+=3)for(int x=8;x<diameter-8;x+=3){
-    check(prepared.bitmap.getRGB(x,y)==live.bitmap.getRGB(cx-radius+x,cy-radius+y),
+   RootRenderer.bakeCdArtwork(prepared.scope,(scope,w,h)->paintSwatches(prepared,w,h),aspect,diameter,prepared::path);
+   var composed=renderPrepared(side,aspect,prepared,0,false);
+   for(int y=0;y<side;y+=3)for(int x=side;x<side*2;x+=3){
+    check(composed.bitmap.getRGB(x,y)==live.bitmap.getRGB(x,y),
         "prepared CD matches live crop, translucent center and finish: "+aspect+" at "+x+","+y);
    }
-   check((prepared.bitmap.getRGB(0,0)>>>24)==0,"prepared CD corners stay transparent");
+   check(prepared.bitmap.getRGB(0,0)==0xff315d90,"cached artwork spans the square behind the fixed rim");
+   check((composed.bitmap.getRGB(side,0)>>>24)==0,"visible disc corners stay transparent");
    check((prepared.bitmap.getRGB(radius+15,radius)>>>24)==24,"prepared center keeps the transparent film");
   }
   var fit=new VinylLabelFraming(VinylLabelFraming.Crop.FULL,true,100,0,0);
@@ -83,12 +145,13 @@ public class GeneratedDiscFinishTest {
   var prepared=new RootRasterTest.Raster(diameter,diameter);
   RootRenderer.paint(live.scope,1,framedSource(live,fit),(s,x,y,d)->false,
       live::path,1,100,false,null,0,DiscSettings.Style.CD,DiscSettings.VinylColor.BLUE,false);
-  RootRenderer.bakeCd(prepared.scope,framedSource(prepared,fit),1,diameter,prepared::path);
+  RootRenderer.bakeCdArtwork(prepared.scope,framedSource(prepared,fit),1,diameter,prepared::path);
   check(live.bitmap.getRGB(200,200)==Color.RED.getRGB(),"CD framing does not change the sleeve");
   check(live.bitmap.getRGB(cx+100,cy)==RootRenderer.CD_FACE_COLOR,"fit shows neutral CD face around the artwork");
   check(live.bitmap.getRGB(cx,cy-95)==Color.GREEN.getRGB(),"fit draws independent CD artwork");
-  for(int y=8;y<diameter-8;y+=3)for(int x=8;x<diameter-8;x+=3)
-   check(prepared.bitmap.getRGB(x,y)==live.bitmap.getRGB(cx-radius+x,cy-radius+y),"prepared CD matches manual framing");
+  var composed=renderPrepared(side,1,prepared,0,false);
+  for(int y=0;y<side;y+=3)for(int x=side;x<side*2;x+=3)
+   check(composed.bitmap.getRGB(x,y)==live.bitmap.getRGB(x,y),"prepared CD matches manual framing");
   var reel=new RootRasterTest.Raster(side*2,side);
   RootRenderer.paint(reel.scope,1,framedSource(reel,fit),(s,x,y,d)->false,
       reel::path,1,100,false,null,0,DiscSettings.Style.REEL_COVER,DiscSettings.VinylColor.BLUE,false);
@@ -97,7 +160,53 @@ public class GeneratedDiscFinishTest {
   check(reel.bitmap.getRGB(cx,cy+110)!=Color.GREEN.getRGB(),"tape window remains visible over the disc artwork");
   check(reel.bitmap.getRGB(cx,cy)==0,"reel retains its center cutout");
   check(GeneratedCdRaster.Key.of(null,null,1f,400,null)==null,"missing cover retains the live fallback");
-  System.out.println("PASS prepared CD reproduces live CD artwork, spindle and transparency");
+  System.out.println("PASS prepared CD reproduces live CD artwork, fixed rim, spindle and transparency");
+ }
+
+ private static RootRasterTest.Raster renderPrepared(int side,float aspect,RootRasterTest.Raster prepared,
+     float angle,boolean custom)throws Exception{
+  var raster=new RootRasterTest.Raster(side*2,side);
+  int[] artworkDraws={0};
+  var disc=new RootRenderer.Disc(){
+   @Override public boolean draw(DrawScope scope,float x,float y,float d){return custom;}
+   @Override public boolean drawCoverCd(DrawScope scope,float x,float y,float d){
+    artworkDraws[0]++;
+    check(raster.graphics.getClip()!=null,"prepared CD is drawn inside the fixed round mask");
+    raster.graphics.setRenderingHint(RenderingHints.KEY_INTERPOLATION,RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+    var imageTransform=AffineTransform.getTranslateInstance(x-d*.5f,y-d*.5f);
+    imageTransform.scale(d/prepared.width,d/prepared.height);
+    raster.graphics.drawImage(prepared.bitmap,imageTransform,null);
+    return true;
+   }
+  };
+  RootRenderer.paint(raster.scope,aspect,raster::source,disc,raster::path,1,100,false,null,angle);
+  check(artworkDraws[0]==(custom?0:1),"custom discs bypass the cached artwork and cover rim");
+  check(raster.circles==(custom?0:3),"when cached artwork is ready, only the three rim circles are redrawn");
+  return raster;
+ }
+
+ private static void checkRotatingRim()throws Exception{
+  int side=400,cx=600,cy=200,radius=196;
+  var prepared=new RootRasterTest.Raster(radius*2,radius*2);
+  RootRenderer.bakeCdArtwork(prepared.scope,(scope,w,h)->paintSwatches(prepared,w,h),1,radius*2,prepared::path);
+  var upright=renderPrepared(side,1,prepared,0,false).bitmap;
+  for(float angle:new float[]{7,19,37,61,86,123,207,317}){
+   var rotated=renderPrepared(side,1,prepared,angle,false).bitmap;
+   int changed=0,edgePixels=0;
+   for(int y=0;y<side;y++)for(int x=side;x<side*2;x++){
+    double distance=Math.hypot(x+.5-cx,y+.5-cy);
+    if(distance>=radius-.45){
+     int pixel=upright.getRGB(x,y);
+     if((pixel>>>24)>0)edgePixels++;
+     check(rotated.getRGB(x,y)==pixel,"rotation cannot move the white rim or leave pixels outside it");
+    }
+    if(distance<radius*.8&&rotated.getRGB(x,y)!=upright.getRGB(x,y))changed++;
+   }
+   check(edgePixels>50,"the comparison includes the visible rim pixels");
+   check(changed>500,"artwork still rotates inside the stationary rim");
+  }
+  renderPrepared(side,1,prepared,37,true);
+  System.out.println("PASS prepared CD rotates its artwork across eight angles with a stationary outer boundary");
  }
 
  private static RootRenderer.Source framedSource(RootRasterTest.Raster raster,VinylLabelFraming framing){

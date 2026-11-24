@@ -27,7 +27,7 @@ final class ComposeEntryFrames extends ContinuationImpl {
  static Object run(Continuation<? super Unit> completion,BooleanSupplier frame,Runnable finished,
      Consumer<Throwable> failed){
   var clock=completion.getContext().get(MonotonicFrameClock.Key);
-  if(clock==null)return Unit.INSTANCE;
+  if(clock==null){finished.run();return Unit.INSTANCE;}
   return new ComposeEntryFrames(completion,clock,frame,finished,failed).invokeSuspend(Boolean.TRUE);
  }
 

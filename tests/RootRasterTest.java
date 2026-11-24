@@ -15,7 +15,7 @@ public class RootRasterTest {
   final BufferedImage bitmap;Graphics2D graphics;final float width,height;
   record Saved(AffineTransform transform,java.awt.Shape clip,Graphics2D parent,BufferedImage layer,float alpha){}
   final ArrayDeque<Saved> saved=new ArrayDeque<>();int circles,sourceCalls;
-  int wordmarkStrokes,pathDraws;
+  int wordmarkStrokes,pathDraws,perspectiveTransforms;
   final Map<androidx.compose.ui.graphics.Path,java.awt.geom.Area> masks=new IdentityHashMap<>();
   final Map<androidx.compose.ui.graphics.Path,Path2D.Float> outlines=new IdentityHashMap<>();
   androidx.compose.ui.graphics.Path path(){
@@ -76,6 +76,12 @@ public class RootRasterTest {
       }else{graphics.setTransform(state.transform());graphics.setClip(state.clip());}
      }
      case "translate"->graphics.translate((Float)a[0],(Float)a[1]);
+     case "concat-58bKbWc"->{
+      var matrix=(float[])a[0];
+      perspectiveTransforms++;
+      // Java2D represents the affine portion. CoverHoverTest checks the perspective coefficients.
+      graphics.transform(new AffineTransform(matrix[0],matrix[1],matrix[4],matrix[5],matrix[12],matrix[13]));
+     }
      case "rotate"->graphics.rotate(Math.toRadians((Float)a[0]));
      case "scale"->graphics.scale((Float)a[0],(Float)a[1]);
      case "clipRect-N_I0leg"->graphics.clip(new Rectangle2D.Float((Float)a[0],(Float)a[1],(Float)a[2]-(Float)a[0],(Float)a[3]-(Float)a[1]));
@@ -203,7 +209,7 @@ public class RootRasterTest {
   int cases=0;
   for(int side:new int[]{180,295,420,620}){
    Raster r=new Raster(side*3/2,side);RootRenderer.paint(r.scope,1,r::source,(s,x,y,d)->false,r::path);
-   check(r.sourceCalls==2&&r.circles==9,"cover copy generates CD with white rim, translucent bevel and spindle dot");
+   check(r.sourceCalls==2&&r.circles==9,"cover copy generates CD with optical rim, translucent bevel and spindle dot");
    int p=5;
    check(r.bitmap.getRGB(p,p)==Color.RED.getRGB(),"full cover upper-left preserved");
    check(r.bitmap.getRGB(side-p,p)==Color.GREEN.getRGB(),"full cover upper-right preserved");

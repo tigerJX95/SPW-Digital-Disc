@@ -1,9 +1,7 @@
 package io.github.tigerjx95.spwcdprobe;
 
 import androidx.compose.ui.graphics.ImageBitmap;
-import androidx.compose.ui.graphics.SkiaImageAsset_skikoKt;
 import androidx.compose.ui.graphics.drawscope.DrawScope;
-import org.jetbrains.skia.Image;
 
 /** Flat transparent artwork, cached for the lifetime of the plugin class loader. */
 final class ReelWordmark {
@@ -35,14 +33,7 @@ final class ReelWordmark {
  }
 
  private static ImageBitmap load(String name){
-  try(var stream=ReelWordmark.class.getResourceAsStream("/reel-wordmark/"+name)){
-   if(stream==null)return null;
-   try(Image image=Image.Companion.makeFromEncoded(stream.readAllBytes())){
-    return SkiaImageAsset_skikoKt.toComposeImageBitmap(image);
-   }
-  }catch(Exception|LinkageError unavailable){
-   return null;
-  }
+  return DiscImage.loadResource("/reel-wordmark/"+name);
  }
 
  static void prepare(boolean solid){

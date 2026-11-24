@@ -59,7 +59,7 @@ final class RenderWarmup {
   var reel=appearance.reelColor()==DiscSettings.ReelColor.RANDOM?DiscSettings.ReelColor.DEFAULT:appearance.reelColor();
   var finishes=new RootRenderer.Finishes();
   RootRenderer.Disc generated=(destination,x,y,d)->false;
-  var corners=new RootRenderer.CoverCorners();
+  var corners=new RootRenderer.CoverLayer();
   ReflectionRenderer.Content paint=()->RootRenderer.paint(scope,1f,cover,generated,paths,.6f,target.amount(),false,null,0f,
       style,vinyl,false,reel,corners,CoverHandoff.coverCornerRadius(1f,1f),finishes);
   paint.draw();

@@ -50,6 +50,45 @@ public class ProductionRotationHandoffTest {
    check(rotation.sample("b",true,true,false,Long.MAX_VALUE/2)==hidden,"hide freezes before timer can include hidden time");
    restore.invoke(frame);check(angle.getValue()==0,"primary page resets cached angle");
   }
+  Object hoverFrame=constructor.newInstance(plugin);
+  var hoverMotion=(DiscTransition)field(hoverFrame,"motion");
+  var hover=(CoverHover)field(hoverFrame,"coverHover");
+  var hoverTilt=(MutableState<CoverHover.Tilt>)field(hoverFrame,"coverTilt");
+  ((MutableState<Boolean>)field(hoverFrame,"ready")).setValue(true);
+  ((MutableState<Object>)field(hoverFrame,"passPainter")).setValue(new Object());
+  var pointer=type.getDeclaredMethod("moveCoverPointer",long.class);pointer.setAccessible(true);
+  var sampleHover=type.getDeclaredMethod("sampleCoverHover",long.class);sampleHover.setAccessible(true);
+  long t=2_000_000_000L;
+  hoverMotion.trackChanged();hoverMotion.trackReady(t);
+  hover.bounds(0,0,400,400);
+  pointer.invoke(hoverFrame,RootRenderer.pack(360,55));sampleHover.invoke(hoverFrame,t);
+  check(hoverTilt.getValue()==CoverHover.Tilt.FLAT,"ignore input during disc ejection");
+  hoverMotion.tick(t+700_000_000L);hover.bounds(0,0,400,400);
+  pointer.invoke(hoverFrame,RootRenderer.pack(360,55));
+  long sampled=System.nanoTime()+16_000_000L;
+  sampleHover.invoke(hoverFrame,sampled);
+  check(hoverTilt.getValue().x()>0&&hoverTilt.getValue().y()<0,"open cover publishes hover tilt");
+  var drawn=hoverTilt.getValue();
+  ((RootRenderer.CoverLayer)field(hoverFrame,"coverLayer")).tilt=drawn;
+  pointer.invoke(hoverFrame,RootRenderer.pack(30,340));sampleHover.invoke(hoverFrame,sampled+16_000_000L);
+  check(!hoverTilt.getValue().equals(drawn),"a clock sample can be newer than the last painted frame");
+  long closeAt=sampled+20_000_000L;
+  close.invoke(hoverFrame,closeAt,(Runnable)()->{},true);
+  check(hoverTilt.getValue()==drawn,"retraction starts from the painted angle");
+  var control=new DiscTransition();
+  control.trackChanged();control.trackReady(t);control.tick(t+700_000_000L);
+  control.close(closeAt,()->{},true);
+  var advance=type.getDeclaredMethod("advanceMotion",long.class);advance.setAccessible(true);
+  var hoverPose=(MutableState<DiscTransition.Pose>)field(hoverFrame,"pose");
+  pointer.invoke(hoverFrame,RootRenderer.pack(30,340));
+  for(int ms=0;ms<=660;ms++){
+   long now=closeAt+ms*1_000_000L;
+   control.tick(now);advance.invoke(hoverFrame,now);
+   check(hoverPose.getValue().equals(control.pose()),"hover shares the original retraction timing at "+ms+" ms");
+   if(ms==60)check(Math.abs(hoverTilt.getValue().x()-drawn.x()*.5f)<.0001f
+       &&hoverPose.getValue().exposed()<1,"sleeve returns halfway while the disc is already moving");
+   if(ms>=120)check(hoverTilt.getValue()==CoverHover.Tilt.FLAT,"hover is flat before host handoff");
+  }
   System.out.println("PASS production rotation boundaries: 100 Frame returns including zero exposure, immediate source reset, hidden freeze, primary reset and one-shot navigation");
  }
 }

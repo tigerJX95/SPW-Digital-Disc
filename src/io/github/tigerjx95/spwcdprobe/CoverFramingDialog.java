@@ -52,6 +52,10 @@ public final class CoverFramingDialog implements AutoCloseable {
   if(workspace!=null&&workspace.dialog.isDisplayable()){workspace.dialog.toFront();return;}
   var owner=KeyboardFocusManager.getCurrentKeyboardFocusManager().getActiveWindow();
   var dialog=new JDialog(owner,TITLE,Dialog.ModalityType.MODELESS);
+  dialog.setUndecorated(true);
+  dialog.getRootPane().setWindowDecorationStyle(JRootPane.NONE);
+  dialog.getAccessibleContext().setAccessibleName(TITLE);
+  dialog.setBackground(BACKGROUND);
   dialog.setDefaultCloseOperation(WindowConstants.DO_NOTHING_ON_CLOSE);
   var workspace=new AlbumWorkspace(dialog,entry->FramingAlbumLibrary.cover(entry,480));
   this.workspace=workspace;
@@ -66,6 +70,9 @@ public final class CoverFramingDialog implements AutoCloseable {
   dialog.pack();
   dialog.setLocationRelativeTo(owner);
   dialog.setVisible(true);
+  var root=dialog.getRootPane();
+  root.paintImmediately(0,0,root.getWidth(),root.getHeight());
+  Toolkit.getDefaultToolkit().sync();
  }
 
  private FramingAlbumLibrary.Entry readPlayingEntry(){
@@ -110,6 +117,7 @@ public final class CoverFramingDialog implements AutoCloseable {
 
   AlbumWorkspace(JDialog dialog,Function<FramingAlbumLibrary.Entry,CompletionStage<BufferedImage>> loadCover){
    super(new BorderLayout());
+   setBackground(BACKGROUND);
    this.dialog=dialog;
    this.loadCover=loadCover;
    selectedEntry=readPlayingEntry();
@@ -119,7 +127,10 @@ public final class CoverFramingDialog implements AutoCloseable {
    add(picker,BorderLayout.EAST);
    var preview=sample(selectedAlbum);
    rebuild(original.mode(),0,null,preview);
-   if(preview==null&&selectedEntry!=null)selectAlbum(selectedEntry,false);
+   if(selectedEntry!=null){
+    if(preview==null)selectAlbum(selectedEntry,false);
+    else picker.setThumbnail(selectedEntry,preview.image());
+   }
   }
 
   private Appearance appearance(AlbumKey album){
@@ -185,7 +196,8 @@ public final class CoverFramingDialog implements AutoCloseable {
 
   private void editAlbum(FramingAlbumLibrary.Entry entry){
    if(saving||closed)return;
-   if(pendingCover!=null&&pendingCover.entry().key().equals(entry.key()))return;
+   entry=picker.coverEntry(entry);
+   if(pendingCover!=null&&pendingCover.entry().equals(entry))return;
    boolean sameAlbum=Objects.equals(selectedAlbum,entry.key());
    if(sameAlbum&&hasCover){
     cancelCoverRequest();
@@ -211,21 +223,22 @@ public final class CoverFramingDialog implements AutoCloseable {
   private void selectAlbum(FramingAlbumLibrary.Entry entry,boolean openFraming){
    if(saving||closed)return;
    cancelCoverRequest();
-   var request=new CoverRequest(entry,openFraming);
+   var playing=readPlayingEntry();
+   boolean current=playing!=null&&entry.key().equals(playing.key());
+   var first=current?playing.withAlternatives(entry):entry;
+   var request=new CoverRequest(picker.coverEntry(first),openFraming);
    var ready=sample(entry.key());
    if(ready!=null){showAlbum(request,ready);return;}
 
    // Keep the preview and its edit target together while the next cover is loading.
    pendingCover=request;
-   var playing=readPlayingEntry();
-   if(playing!=null&&entry.key().equals(playing.key())){
+   if(current){
     attempts=0;
     retry.start();
-    if(entry.trackIds().isEmpty())entry=playing;
    }
    readingCover=true;
    try{
-    loadCover.apply(entry).whenComplete((image,error)->
+    loadCover.apply(request.entry()).whenComplete((image,error)->
         SwingUtilities.invokeLater(()->coverLoaded(request,error==null?image:null)));
    }catch(RuntimeException|LinkageError unavailable){
     SwingUtilities.invokeLater(()->coverLoaded(request,null));
@@ -270,6 +283,7 @@ public final class CoverFramingDialog implements AutoCloseable {
    selectedEntry=request.entry();
    selectedAlbum=selectedEntry.key();
    picker.setEditingAlbum(selectedEntry);
+   if(preview!=null)picker.setThumbnail(selectedEntry,preview.image());
    boolean restoreEditorSize=!hasCover&&preview!=null;
    int tab=request.openFraming()?1:view.tabs.getSelectedIndex();
    rebuild(selected(view.modes),tab,view.selectedStyle(),preview);
@@ -446,7 +460,7 @@ public final class CoverFramingDialog implements AutoCloseable {
   heading.add(controls.albumActions);
   panel.add(heading,BorderLayout.NORTH);
   if(sample==null){
-   panel.add(placeholder(album==null?"请先播放带有专辑信息的曲目，或选择专辑。":"当前专辑的封面预览暂不可用。"));
+   panel.add(placeholder(album==null?"请先播放带有专辑信息的曲目，或选择专辑。":"暂时无法读取当前专辑封面，可点「重新读取封面」再试。"));
    return new FramingPage(panel,()->initial);
   }
 

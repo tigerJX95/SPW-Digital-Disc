@@ -12,6 +12,26 @@ public class ProductionResumeTest {
   var sync=type.getDeclaredMethod("syncVisibility",boolean.class);sync.setAccessible(true);
   var pass=(MutableState<Object>)field(frame,"passPainter");var ready=(MutableState<Boolean>)field(frame,"ready");var pending=(MutableState<Boolean>)field(frame,"trackPending");
   var retained=(MutableState<Boolean>)field(frame,"retainingReturn");var motion=(DiscTransition)field(frame,"motion");var pose=(MutableState<DiscTransition.Pose>)field(frame,"pose");
+  var primary=type.getDeclaredField("enteringFromPrimary");primary.setAccessible(true);
+  for(var speed:DiscSpeed.values()){
+   motion.setSpeed(speed);
+   primary.setBoolean(frame,true);
+   sync.invoke(frame,true);
+   long origin=1_000_000_000L;
+   motion.ready(origin);motion.tick(origin+speed.duration(150_000_000L));
+   check(motion.phase()==DiscTransition.Phase.COVER,"primary cover gets the full lead");
+   sync.invoke(frame,false);sync.invoke(frame,true);
+   motion.tick(origin+10_000_000_000L);
+   check(motion.phase()==DiscTransition.Phase.WAITING,"bar waits for actual artwork and layout");
+   motion.ready(origin);
+   motion.tick(origin+speed.duration(100_000_000L)-1);
+   motion.tick(origin+speed.duration(110_000_000L));
+   check(motion.phase()==DiscTransition.Phase.OPENING&&motion.pose().exposed()>0,"direct return starts eject sooner");
+   motion.tick(origin+speed.duration(100_000_000L)+speed.duration(700_000_000L));
+   check(motion.phase()==DiscTransition.Phase.OPEN,"complete normal-speed eject");
+   sync.invoke(frame,false);
+  }
+  motion.setSpeed(DiscSpeed.STANDARD);
   AtomicInteger navigation=new AtomicInteger();long now=1_000_000_000L;
   for(int i=0;i<100;i++){
    sync.invoke(frame,true);motion.ready(now);motion.tick(now+940_000_000L);pass.setValue(new Object());ready.setValue(true);pending.setValue(true);retained.setValue(true);

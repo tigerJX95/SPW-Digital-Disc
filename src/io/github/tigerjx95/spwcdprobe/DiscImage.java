@@ -28,6 +28,16 @@ final class DiscImage implements AutoCloseable {
  private CoverWhiteBorders.Bounds coverBounds;
  private CoverWhiteBorders.Mode coverMode;
  private DiscImage(Bitmap bitmap){nativeBitmap=bitmap;this.bitmap=SkiaImageAsset_skikoKt.asComposeImageBitmap(bitmap);width=bitmap.getWidth();height=bitmap.getHeight();}
+ static ImageBitmap loadResource(String path){
+  try(var stream=DiscImage.class.getResourceAsStream(path)){
+   if(stream==null)return null;
+   try(Image image=Image.Companion.makeFromEncoded(stream.readAllBytes())){
+    return SkiaImageAsset_skikoKt.toComposeImageBitmap(image);
+   }
+  }catch(Exception|LinkageError unavailable){
+   return null;
+  }
+ }
  static DiscImage decode(byte[] bytes,int width,int height)throws Exception{
   var prepared=DiscArtwork.prepare(bytes,width,height);
   try{bytes=DiscArtwork.pixels(prepared);width=height=prepared.getWidth();}finally{prepared.flush();}
@@ -61,10 +71,13 @@ final class DiscImage implements AutoCloseable {
  CoverWhiteBorders.Bounds labelBounds(VinylLabelFraming.Crop crop){return crop.pixels(width,height);}
  java.awt.image.BufferedImage labelPreview(){return labelPreview(nativeBitmap);}
  static java.awt.image.BufferedImage labelPreview(Bitmap bitmap){
-  int sourceWidth=bitmap.getWidth(),sourceHeight=bitmap.getHeight();
-  float scale=Math.min(1,480f/Math.max(sourceWidth,sourceHeight));
+  try(var original=Image.Companion.makeFromBitmap(bitmap)){return labelPreview(original,480);}
+ }
+ static java.awt.image.BufferedImage labelPreview(Image original,int maxSize){
+  int sourceWidth=original.getWidth(),sourceHeight=original.getHeight();
+  float scale=Math.min(1,(float)maxSize/Math.max(sourceWidth,sourceHeight));
   int w=Math.max(1,Math.round(sourceWidth*scale)),h=Math.max(1,Math.round(sourceHeight*scale));
-  try(var original=Image.Companion.makeFromBitmap(bitmap);var surface=Surface.Companion.makeRasterN32Premul(w,h)){
+  try(var surface=Surface.Companion.makeRasterN32Premul(w,h)){
    surface.getCanvas().clear(0);
    surface.getCanvas().drawImageRect(original,0,0,sourceWidth,sourceHeight,0,0,w,h,
        org.jetbrains.skia.SamplingMode.Companion.getLINEAR(),null,true);

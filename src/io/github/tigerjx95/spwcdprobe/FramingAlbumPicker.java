@@ -3,6 +3,7 @@ package io.github.tigerjx95.spwcdprobe;
 import java.awt.*;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
+import java.awt.image.BufferedImage;
 import java.util.*;
 import java.util.List;
 import java.util.concurrent.CompletionStage;
@@ -82,6 +83,21 @@ final class FramingAlbumPicker extends JPanel {
   list.repaint();
  }
 
+ Entry coverEntry(Entry preferred){
+  for(var entry:catalog){
+   if(entry.key().equals(preferred.key()))return preferred.withAlternatives(entry);
+  }
+  return preferred;
+ }
+
+ void setThumbnail(Entry entry,BufferedImage artwork){
+  var image=FramingAlbumLibrary.scaled(artwork,artwork.getWidth(),artwork.getHeight(),42);
+  missing.remove(entry.key());
+  thumbnails.put(entry.key(),new ImageIcon(image));
+  if(thumbnails.size()>96)thumbnails.pollFirstEntry();
+  list.repaint();
+ }
+
  void open(Supplier<CompletionStage<List<Entry>>> loadAlbums){
   SwingUtilities.invokeLater(this::loadThumbnail);
   if(reading||loaded||closed)return;
@@ -141,18 +157,16 @@ final class FramingAlbumPicker extends JPanel {
   int last=Math.min(results.size()-1,list.getLastVisibleIndex());
   for(int i=first;i<=last;i++){
    Entry entry=results.get(i);
-   if(entry.trackIds().isEmpty()||thumbnails.containsKey(entry.key())||missing.contains(entry.key()))continue;
+   if(!entry.hasSources()||thumbnails.containsKey(entry.key())||missing.contains(entry.key()))continue;
    thumbnailPending=true;
    try{
     FramingAlbumLibrary.cover(entry,42).whenComplete((image,error)->SwingUtilities.invokeLater(()->{
      if(closed)return;
-     if(error!=null||image==null)missing.add(entry.key());
-     else{
-      thumbnails.put(entry.key(),new ImageIcon(image));
-      if(thumbnails.size()>96)thumbnails.pollFirstEntry();
+     if(!thumbnails.containsKey(entry.key())){
+      if(image!=null)setThumbnail(entry,image);
+      else missing.add(entry.key());
      }
      thumbnailPending=false;
-     list.repaint();
      loadThumbnail();
     }));
    }catch(RuntimeException|LinkageError unavailable){
