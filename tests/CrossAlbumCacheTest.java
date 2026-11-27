@@ -8,7 +8,13 @@ import java.util.concurrent.atomic.*;
 /** File-backed LRU, aggregate pixel budget, invalidation and exact ownership. */
 public class CrossAlbumCacheTest {
  static void check(boolean b,String reason){if(!b)throw new AssertionError(reason);}
- static class Asset implements AutoCloseable {int closed;public void close(){closed++;}}
+ static class Asset implements LocalDiscService.Pixels {
+  final int side;
+  int closed;
+  Asset(int side){this.side=side;}
+  public long pixelBytes(){return 4L*side*side;}
+  public void close(){closed++;}
+ }
  static long bytes(LocalDiscService<?> service)throws Exception{var f=LocalDiscService.class.getDeclaredField("cacheBytes");f.setAccessible(true);return f.getLong(service);}
  static int size(LocalDiscService<?> service)throws Exception{var f=LocalDiscService.class.getDeclaredField("cache");f.setAccessible(true);return ((Map<?,?>)f.get(service)).size();}
  static Asset get(LocalDiscService<Asset> service,String song)throws Exception{var a=new AtomicReference<Asset>();service.drawFor(song,a::set);return a.get();}
@@ -20,7 +26,7 @@ public class CrossAlbumCacheTest {
   Path root=Files.createTempDirectory("cross-album-cache");byte[] png=LocalDiscServiceTest.png(0xffb42658);
   var songs=new ArrayList<String>();for(int i=0;i<6;i++)songs.add(album(root,"album"+i,png));
   var song=new AtomicReference<String>();var made=new ArrayList<Asset>();var decodes=new AtomicInteger();var revisions=new AtomicInteger();var duringDecode=new AtomicReference<Runnable>();var log=new ArrayList<String>();
-  var service=new LocalDiscService<Asset>(song::get,(b,w,h)->{decodes.incrementAndGet();var probe=duringDecode.getAndSet(null);if(probe!=null)probe.run();var a=new Asset();made.add(a);return a;},revisions::incrementAndGet,log::add);
+  var service=new LocalDiscService<Asset>(song::get,(b,w,h)->{decodes.incrementAndGet();var probe=duringDecode.getAndSet(null);if(probe!=null)probe.run();var a=new Asset(w);made.add(a);return a;},revisions::incrementAndGet,log::add);
   var first=new ArrayList<Asset>();
   for(int i=0;i<4;i++){select(service,song,songs.get(i));first.add(get(service,song.get()));}
   check(size(service)==4&&decodes.get()==4,"four small albums share bounded cache");
@@ -58,12 +64,30 @@ public class CrossAlbumCacheTest {
   var large=new BufferedImage(4000,4000,BufferedImage.TYPE_BYTE_GRAY);byte[] largePng=DiscArtworkTest.bytes(large,"png");large.flush();
   var bigSongs=new ArrayList<String>();for(int i=0;i<3;i++)bigSongs.add(album(root,"big"+i,largePng));
   made.clear();decodes.set(0);song.set(null);
-  var big=new LocalDiscService<Asset>(song::get,(b,w,h)->{check(w==4000&&h==4000,"real image dimensions");decodes.incrementAndGet();var a=new Asset();made.add(a);return a;},()->{},s->{});
+  var big=new LocalDiscService<Asset>(song::get,(b,w,h)->{check(w==4000&&h==4000,"real image dimensions");decodes.incrementAndGet();var a=new Asset(2048);made.add(a);return a;},()->{},s->{});
   select(big,song,bigSongs.get(0));Asset a=get(big,song.get());select(big,song,bigSongs.get(1));Asset b=get(big,song.get());
   check(size(big)==2&&bytes(big)==32L*1024*1024,"two 2048px display copies reach 32MiB including active");
   select(big,song,bigSongs.get(0));check(get(big,song.get())==a&&decodes.get()==2,"large A-B-A saves a decode");
   select(big,song,bigSongs.get(2));check(size(big)==2&&bytes(big)<=LocalDiscService.CACHE_BYTES&&b.closed==1&&a.closed==0,"byte budget evicts LRU before entry-count limit");
   big.close();for(var asset:made)check(asset.closed==1,"large cache cleanup exactly once");
+  // Four tall opaque scans have small square display copies. Charging the
+  // source's long edge would evict two of these even though all four fit.
+  var scan=new BufferedImage(1000,4000,BufferedImage.TYPE_INT_RGB);
+  byte[] scanBytes=DiscArtworkTest.bytes(scan,"jpg");scan.flush();
+  var scans=new ArrayList<String>();
+  for(int i=0;i<4;i++)scans.add(album(root,"scan"+i,scanBytes));
+  var artwork=new DiscArtwork();
+  decodes.set(0);
+  try(var narrow=new LocalDiscService<Asset>(song::get,(data,w,h)->{
+   var prepared=artwork.prepare(data,w,h);
+   try{decodes.incrementAndGet();return new Asset(prepared.getWidth());}
+   finally{prepared.flush();}
+  },()->{},s->{})){
+   for(String track:scans)select(narrow,song,track);
+   for(int repeat=0;repeat<5;repeat++)for(String track:scans)select(narrow,song,track);
+   check(decodes.get()==4 && size(narrow)==4 && bytes(narrow)==16_000_000L,
+     "twenty revisits reuse four cropped display images within the existing pixel budget");
+  }
   System.out.println("PASS cross-album LRU reuse, 4-entry/32MiB aggregate bounds, pending isolation, replacement/deletion/discard invalidation, diagnostics, no-media and exact disposal");
  }
 }

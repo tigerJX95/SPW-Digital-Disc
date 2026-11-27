@@ -216,6 +216,7 @@ public final class CoverFramingDialog implements AutoCloseable {
     view.playbackHint.setText("暂无可定位的播放曲目");
     return;
    }
+   if(pendingCover!=null&&!pendingCover.openFraming()&&pendingCover.entry().equals(picker.coverEntry(entry)))return;
    covers.remove(entry.key());
    selectAlbum(entry,false);
   }
@@ -474,7 +475,7 @@ public final class CoverFramingDialog implements AutoCloseable {
   var defaultStyle=controls.initialStyle;
   option(previewRow,previews,"CD",Style.CD.name(),defaultStyle==Style.CD);
   option(previewRow,previews,"黑胶／彩胶",Style.COLORED_VINYL.name(),defaultStyle==Style.COLORED_VINYL);
-  option(previewRow,previews,"封面磁带",Style.REEL_COVER.name(),defaultStyle==Style.REEL_COVER);
+  option(previewRow,previews,Style.REEL_COVER.label,Style.REEL_COVER.name(),defaultStyle==Style.REEL_COVER);
   heading.add(previewRow);
 
   var cd=editor(album,faceChoice(FramingTarget.CD,initial.cd()),sample,Style.CD,crop,modes);

@@ -15,7 +15,16 @@ public class ContinuousCoverTest {
  @SuppressWarnings("unchecked") public static void main(String[] args)throws Exception{
   var plugin=new CdPageProbePlugin(new PluginContext("test","1.1.0-test2",".","1.19.0",Channel.MS));
   ((MutableState<Boolean>)field(CdPageProbePlugin.class,"enabled").get(plugin)).setValue(true);
-  var type=Class.forName(CdPageProbePlugin.class.getName()+"$Frame");var ctor=type.getDeclaredConstructors()[0];ctor.setAccessible(true);Object frame=ctor.newInstance(plugin);
+  var type=Class.forName(CdPageProbePlugin.class.getName()+"$Frame");var ctor=type.getDeclaredConstructors()[0];ctor.setAccessible(true);
+  if(args.length>0){
+   switch(args[0]){
+    case "rotation" -> unavailableRotation(plugin,ctor.newInstance(plugin));
+    case "return" -> unavailableReturn(plugin,ctor.newInstance(plugin));
+    default -> throw new IllegalArgumentException("Unknown case: "+args[0]);
+   }
+   return;
+  }
+  Object frame=ctor.newInstance(plugin);
   field(type,"secondary").setBoolean(frame,true);field(type,"sheet").set(frame,new PlayerSheetState(null));
   ((MutableState<Boolean>)field(type,"ready").get(frame)).setValue(true);
   LayoutCoordinates root=(LayoutCoordinates)Proxy.newProxyInstance(LayoutCoordinates.class.getClassLoader(),new Class[]{LayoutCoordinates.class},(p,m,a)->{
@@ -106,9 +115,89 @@ public class ContinuousCoverTest {
   observe.invoke(frame,(String)null,null);check(pixels.closes==1&&pass.getValue()==null,"no current media releases waiting pixels");
   DiscImage last=new DiscImage();field(type,"pendingCover").set(frame,last);
   restore.invoke(frame);check(last.closes==1&&field(type,"pendingCover").get(frame)==null&&pass.getValue()==null,"page exit releases retained image and restores native layer");
+  OpenRotationTest.main(new String[0]);
   nativeReturn(ctor.newInstance(plugin));
+  unavailableRotation(plugin,ctor.newInstance(plugin));
+  unavailableReturn(plugin,ctor.newInstance(plugin));
   System.out.println("PASS real production Frame: 100 playback-before- and playback-after-observer handoffs without native-layout gap, placeholder cannot eject, stationary cover, fresh-source atomic swap, exact disposal, rapid changes, no-media and page-exit cleanup");
   System.out.println("Native pixels and settled visibility are doubles; native Windows playback is outside this offline test.");
+ }
+
+ @SuppressWarnings("unchecked") static Method prepareUnavailablePlayback(CdPageProbePlugin plugin,Object frame,long start)throws Exception{
+  // This process runs without an initialized host playback service.
+  try{
+   WorkshopApi.playback().getCurrentMediaItem();
+   throw new AssertionError("this test needs an unavailable playback service");
+  }catch(RuntimeException expected){}
+  var type=frame.getClass();
+  field(type,"secondary").setBoolean(frame,true);
+  field(type,"sheet").set(frame,new PlayerSheetState(null));
+  var sync=type.getDeclaredMethod("syncVisibility",boolean.class);
+  sync.setAccessible(true);
+  sync.invoke(frame,true);
+  var motion=(DiscTransition)field(type,"motion").get(frame);
+  motion.ready(start);
+  motion.tick(start+1_000_000_000L);
+  var frames=(List<java.lang.ref.WeakReference<Object>>)field(CdPageProbePlugin.class,"frames").get(plugin);
+  frames.add(new java.lang.ref.WeakReference<>(frame));
+  field(CdPageProbePlugin.class,"running").setBoolean(plugin,true);
+  var timer=CdPageProbePlugin.class.getDeclaredMethod("animateFrames");
+  timer.setAccessible(true);
+  return timer;
+ }
+
+ @SuppressWarnings("unchecked") static void unavailableRotation(CdPageProbePlugin plugin,Object frame)throws Exception{
+  var type=frame.getClass();
+  long start=System.nanoTime()-4_000_000_000L;
+  var timer=prepareUnavailablePlayback(plugin,frame,start);
+  var song="playing.flac";
+  field(type,"observedSong").set(frame,song);
+  var cover=new DiscImage();
+  field(type,"ownedCover").set(frame,cover);
+  var rotation=(DiscRotation)field(type,"rotation").get(frame);
+  var angle=(MutableState<Float>)field(type,"rotationAngle").get(frame);
+  rotation.sample(song,true,true,true,start);
+  timer.invoke(plugin);
+  float frozen=angle.getValue();
+  check(frozen>0,"unavailable playback must freeze the sampled rotation");
+  timer.invoke(plugin);
+  check(angle.getValue()==frozen && rotation.sample(song,true,true,true,System.nanoTime()+5_000_000_000L)==frozen,
+    "recovery must not replay the unavailable interval");
+  check(song.equals(field(type,"observedSong").get(frame)) && field(type,"ownedCover").get(frame)==cover && cover.closes==0,
+    "a failed read must preserve the known song and cover");
+  System.out.println("PASS playback read failure freezes rotation and preserves the current cover");
+ }
+
+ static void unavailableReturn(CdPageProbePlugin plugin,Object frame)throws Exception{
+  var type=frame.getClass();
+  long start=System.nanoTime()-4_000_000_000L;
+  var timer=prepareUnavailablePlayback(plugin,frame,start);
+  var sync=type.getDeclaredMethod("syncVisibility",boolean.class);
+  sync.setAccessible(true);
+  var cover=new DiscImage();
+  field(type,"ownedCover").set(frame,cover);
+  var motion=(DiscTransition)field(type,"motion").get(frame);
+  var close=type.getDeclaredMethod("closeMotion",long.class,Runnable.class,boolean.class);
+  close.setAccessible(true);
+  var done=new AtomicInteger();
+  close.invoke(frame,start+2_000_000_000L,(Runnable)done::incrementAndGet,true);
+  timer.invoke(plugin);
+  timer.invoke(plugin);
+  check(motion.finished() && done.get()==1,
+    "return must complete once during failed reads: phase="+motion.phase()+", callbacks="+done.get());
+  field(type,"secondary").setBoolean(frame,false);
+  timer.invoke(plugin);
+  check(cover.closes==1,"hidden page releases its cover even when playback is unavailable");
+
+  field(type,"secondary").setBoolean(frame,true);
+  sync.invoke(frame,true);
+  motion.ready(start);
+  motion.tick(start+1_000_000_000L);
+  close.invoke(frame,start+2_000_000_000L,(Runnable)done::incrementAndGet,true);
+  field(type,"secondary").setBoolean(frame,false);
+  timer.invoke(plugin);
+  check(done.get()==1 && !motion.closing(),"collapsing the page cancels pending navigation during an outage");
+  System.out.println("PASS return completes once during failed reads; hiding cancels pending navigation");
  }
 
  @SuppressWarnings("unchecked") static void nativeReturn(Object frame)throws Exception{

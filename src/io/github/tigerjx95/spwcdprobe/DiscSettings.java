@@ -76,7 +76,7 @@ final class DiscSettings implements AutoCloseable {
   }
  }
  enum Style {
-  CD("专辑封面 CD"), BLACK_VINYL("经典黑胶唱片"), COLORED_VINYL("彩胶唱片"), REEL("开盘磁带"), REEL_COVER("专辑封面卷盘");
+  CD("专辑封面 CD"), BLACK_VINYL("经典黑胶唱片"), COLORED_VINYL("彩胶唱片"), REEL("开盘磁带"), REEL_COVER("专辑封面开盘磁带");
   final String label;
   Style(String label){this.label=label;}
   boolean reel(){return this==REEL||this==REEL_COVER;}
@@ -95,11 +95,18 @@ final class DiscSettings implements AutoCloseable {
    if(color==VinylColor.BLACK)color=VinylColor.BLUE;
    if(style!=Style.COLORED_VINYL)vinylLabel=VinylLabelFraming.DEFAULT;
   }
+  String displayName(){
+   return switch(style){
+    case REEL -> reelColor.label+style.label;
+    case COLORED_VINYL -> color.label+style.label;
+    default -> style.label;
+   };
+  }
   VinylColor finish(){return style==Style.COLORED_VINYL?color:VinylColor.BLACK;}
  }
  enum FramingTarget {
   BLACK_VINYL("黑胶"), COLORED_VINYL("彩胶"), BOTH_VINYL("黑胶和彩胶"),
-  CD("CD"), REEL_COVER("封面磁带"), BOTH_DISC("CD 和封面磁带");
+  CD("CD"), REEL_COVER(Style.REEL_COVER.label), BOTH_DISC("CD 和"+Style.REEL_COVER.label);
 
   final String label;
   FramingTarget(String label){this.label=label;}

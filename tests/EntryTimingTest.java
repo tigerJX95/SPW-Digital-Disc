@@ -170,13 +170,35 @@ final class EntryTimingTest {
     ready.setValue(true);
     var motion=(DiscTransition)field(frame,"motion").get(frame);
     var timer=type.getDeclaredMethod("advanceFromTimer",long.class);timer.setAccessible(true);
-    var drive=type.getDeclaredMethod("driveEntryFrames",Continuation.class);drive.setAccessible(true);
+    var drive=type.getDeclaredMethod("driveEntryFrames",Object.class,Continuation.class);drive.setAccessible(true);
     long now=System.nanoTime();
     motion.enter();motion.ready(now-ms(250));
     timer.invoke(frame,now);
     if(motion.phase()!=OPENING||motion.pose().exposed()==0)throw new AssertionError("timer starts without the first host callback");
     var clock=new BroadcastFrameClock();
-    drive.invoke(frame,new Completion(clock));
+    var request=(androidx.compose.runtime.MutableState<?>)field(frame,"entryFrameRequest").get(frame);
+    var oldClock=new BroadcastFrameClock();
+    var firstRequest=request.getValue();
+    drive.invoke(frame,firstRequest,new Completion(oldClock));
+    var visibility=type.getDeclaredMethod("syncVisibility",boolean.class);
+    visibility.setAccessible(true);
+    visibility.invoke(frame,true);
+    visibility.invoke(frame,false);
+    visibility.invoke(frame,true);
+    field(frame,"suppressionApplied").setBoolean(frame,true);
+    ready.setValue(true);
+    now=System.nanoTime();
+    motion.ready(now-ms(250));
+    timer.invoke(frame,now);
+    var nextRequest=request.getValue();
+    if(nextRequest==null||nextRequest==firstRequest)throw new AssertionError("reopened sheet requires its own clock");
+    drive.invoke(frame,nextRequest,new Completion(clock));
+    clock.sendFrame(System.nanoTime());
+    long before=field(frame,"lastEntryFrame").getLong(frame);
+    oldClock.sendFrame(System.nanoTime());
+    if(oldClock.getHasAwaiters()||field(frame,"entryClockOwner").get(frame)!=nextRequest||
+        before!=field(frame,"lastEntryFrame").getLong(frame))
+     throw new AssertionError("a late frame from the previous opening must release without advancing the new one");
     clock.sendFrame(System.nanoTime());
     if(field(frame,"entryClockOwner").get(frame)==null)throw new AssertionError("native frame owns animation");
     long last=field(frame,"lastEntryFrame").getLong(frame);

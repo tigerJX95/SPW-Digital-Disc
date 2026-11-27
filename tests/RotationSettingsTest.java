@@ -100,6 +100,10 @@ public class RotationSettingsTest {
    check(red.isSelected()&&saved.get()==null,"draft color retained across style switches");
    button(panel,"确认").doClick();
    check(saved.get().equals(new DiscSettings.Appearance(DiscSettings.Style.COLORED_VINYL,DiscSettings.VinylColor.RED)),"confirmation saves the selected appearance");
+   for(var reelColor:DiscSettings.ReelColor.values()){
+    var appearance=new DiscSettings.Appearance(DiscSettings.Style.REEL,DiscSettings.VinylColor.BLUE,reelColor);
+    check(appearance.displayName().equals(reelColor.label+"开盘磁带"),"album source names the open-reel tape style and color");
+   }
    button(panel,"开盘磁带").doClick();
    var artwork=button(panel,"专辑封面");
    check(artwork.getParent().isVisible()&&!section.isVisible(),"reel shows its own appearance choices");

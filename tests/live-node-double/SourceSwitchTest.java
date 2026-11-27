@@ -70,6 +70,16 @@ public class SourceSwitchTest {
   Object placeholder=new Object();HostCoverBridge.loading.add(placeholder);artwork.setValue(placeholder);
   HostCoverBridge.nodes.put(root,List.of(new HostCoverBridge.Image(placeholder,root,620*620),new HostCoverBridge.Image(loaded,root,120*120)));
   check(source.invoke(frame)==null,"placeholder and quarantined old cover cannot start new-song CD");
+  HostCoverBridge.nodes.put(root,List.of());
+  observe.invoke(frame,"album-C/track.flac",null);
+  HostCoverBridge.nodes.put(root,List.of(new HostCoverBridge.Image(loaded,root,420*420)));
+  observe.invoke(frame,"album-D/track.flac",null);
+  artwork.setValue(loaded);
+  check(source.invoke(frame)==null,"late B node and draw callback cannot supply D after C was empty");
+  Object discD=new Object();
+  HostCoverBridge.nodes.put(root,List.of(new HostCoverBridge.Image(loaded,root,420*420),new HostCoverBridge.Image(discD,root,120*120)));
+  observe.invoke(frame,"album-D/track.flac",null);
+  check(source.invoke(frame)==discD,"D uses its own newly attached image during overlap");
   System.out.println("PASS track transition recovery: incoming small source, per-song failure reset, late native load wake-up, reused cached source, placeholder exclusion and no redundant refresh");
   System.out.println("PASS secondary-to-primary handoff: native layer invalidation, stable root retained, pass source cleared, readiness reset, late callback cannot reactivate suppression");
   System.out.println("PASS production Frame.source: 100 simulated source changes, stale/closed source rejection, fresh-track recovery and detached-root cleanup");

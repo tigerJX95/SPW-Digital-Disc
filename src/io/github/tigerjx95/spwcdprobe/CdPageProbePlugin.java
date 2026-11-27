@@ -89,11 +89,10 @@ public final class CdPageProbePlugin extends SpwPlugin {
   boolean spinMeasured;
   long previousSpinDraw;
   EntryTiming entryTiming;
-  final MutableState<Boolean> entryFramesRequested=state(false);
+  final MutableState<Object> entryFrameRequest=state(null);
   Object entryClockOwner;
   long lastEntryFrame;
   boolean entryClockTimedOut;
-  boolean openDiscDrawn;
   CoverHandoff coverHandoff;
   CoverOrigin coverOrigin;
   boolean enteringFromPrimary;
@@ -224,7 +223,6 @@ public final class CdPageProbePlugin extends SpwPlugin {
   void advanceMotion(long now){
    boolean redrawEntry=motion.pageEntryAnimating();
    boolean redrawMotion=redrawEntry||motion.closing();
-   if(motion.phase()!=DiscTransition.Phase.OPEN)openDiscDrawn=false;
    boolean changed=motion.tick(now);
    // Widget width conservatively bounds both cover centering and disc travel,
    // including full exposure. Never advance navigation during the brake.
@@ -248,22 +246,26 @@ public final class CdPageProbePlugin extends SpwPlugin {
     report("ENTRY_FRAME_CLOCK_FALLBACK timedOut=true");
    }
    boolean useEntryClock=canUseEntryClock();
-   entryFramesRequested.setValue(useEntryClock);
+   if(useEntryClock){
+    if(entryFrameRequest.getValue()==null)entryFrameRequest.setValue(new Object());
+   }else{
+    entryFrameRequest.setValue(null);
+    entryClockOwner=null;
+   }
    // Before Compose delivers its first frame, or on hosts without a frame clock,
    // the timer keeps the original source-ready start and motion behavior.
    if(!useEntryClock||entryClockOwner==null)advanceMotion(now);
   }
-  Object driveEntryFrames(Continuation<? super Unit> completion){
-   Object owner=new Object();
+  Object driveEntryFrames(Object request,Continuation<? super Unit> completion){
    return ComposeEntryFrames.run(completion,()->{
-    if(!javax.swing.SwingUtilities.isEventDispatchThread()||!canUseEntryClock())return false;
-    entryClockOwner=owner;
+    if(!javax.swing.SwingUtilities.isEventDispatchThread()||entryFrameRequest.getValue()!=request||!canUseEntryClock())return false;
+    entryClockOwner=request;
     long now=System.nanoTime();
     lastEntryFrame=now;
     if(entryTiming!=null)entryTiming.hostFrame(now);
     advanceMotion(now);
     return canUseEntryClock();
-   },()->{if(entryClockOwner==owner)entryClockOwner=null;},
+   },()->{if(entryClockOwner==request)entryClockOwner=null;},
        error->report("ENTRY_FRAME_CLOCK_FALLBACK "+error.getClass().getSimpleName()));
   }
   void observeNativeReturn(long now){
@@ -466,8 +468,8 @@ public final class CdPageProbePlugin extends SpwPlugin {
    entryTiming=null;
   }
   void restoreNative(){
-   entryFramesRequested.setValue(false);entryClockOwner=null;
-   entryClockTimedOut=openDiscDrawn=false;
+   entryFrameRequest.setValue(null);entryClockOwner=null;
+   entryClockTimedOut=false;
    clearCover();lastPainted=null;rotation.reset();rotationAngle.setValue(0f);
    clearReturnHandoff();
    clearEntryTiming();coverHandoff=null;coverOrigin=null;keepPrimaryCover.setValue(false);
@@ -479,8 +481,8 @@ public final class CdPageProbePlugin extends SpwPlugin {
    boolean wasVisible=revealCycle.visible();
    RevealCycle.Edge edge=revealCycle.sample(visible);
    if(edge==RevealCycle.Edge.NONE)return;
-   entryFramesRequested.setValue(false);entryClockOwner=null;
-   entryClockTimedOut=openDiscDrawn=false;
+   entryFrameRequest.setValue(null);entryClockOwner=null;
+   entryClockTimedOut=false;
    if(edge==RevealCycle.Edge.HIDDEN){
     freezeRotation(System.nanoTime());clearCover();
     // Keep the click's origin while the host is still settling the initial page.
@@ -642,7 +644,7 @@ public final class CdPageProbePlugin extends SpwPlugin {
       if(owner.passPainter.getValue()==call.getThisObject())call.setResult(null); // Exact observable source for this draw pass.
      }
     }));
-   localDiscs=new LocalDiscService<>(this::currentSong,DiscImage::decode,()->discRevision.setValue(discRevision.getValue()+1),this::report);
+   localDiscs=new LocalDiscService<>(this::currentSong,DiscImage.decoder(),()->discRevision.setValue(discRevision.getValue()+1),this::report);
    localDiscs.setNames(displaySettings.getValue().localNames());
    localDiscs.start();
    renderWarmupPending=true;renderWarmupDone=false;entryTimings.restart();
@@ -933,7 +935,6 @@ public final class CdPageProbePlugin extends SpwPlugin {
          finally{if(reflectionStarted!=0)reflectionNanos=System.nanoTime()-reflectionStarted;}
         }
        }finally{canvas.restore();}
-       if(phase==DiscTransition.Phase.OPEN&&selected.exposed()==1f&&amount>0)frame.openDiscDrawn=true;
        if(timing!=null){
         timing.paint(phase,started,System.nanoTime()-started,reflectionNanos);
         if(phase==DiscTransition.Phase.OPEN){
@@ -977,8 +978,9 @@ public final class CdPageProbePlugin extends SpwPlugin {
       return Unit.INSTANCE;
      },c,0);
      c.startReplaceGroup(0x43444546);
-     if(frame.entryFramesRequested.getValue())
-      EffectsKt.LaunchedEffect(frame,(scope,completion)->frame.driveEntryFrames(completion),c,0);
+     var entryRequest=frame.entryFrameRequest.getValue();
+     if(entryRequest!=null)
+      EffectsKt.LaunchedEffect(entryRequest,(scope,completion)->frame.driveEntryFrames(entryRequest,completion),c,0);
      c.endReplaceGroup();
      c.startReplaceGroup(0x43444548);
      var hoverRequest=frame.hoverFrameRequest.getValue();
@@ -1050,12 +1052,7 @@ public final class CdPageProbePlugin extends SpwPlugin {
    var album=currentAlbumKey(song);
    var appearance=display.appearanceFor(album);
    String source=album!=null&&display.albumStyles().containsKey(album)?"专辑设置":"全局默认";
-   String style=switch(appearance.style()){
-    case COLORED_VINYL -> appearance.color().label+"彩胶唱片";
-    case REEL -> appearance.reelColor().label+"卷盘";
-    default -> appearance.style().label;
-   };
-   String description=source+" · "+style;
+   String description=source+" · "+appearance.displayName();
    return new DiscSettings.ArtworkSource(description,DiscSettings.ArtworkKind.GENERATED);
   }catch(RuntimeException unavailable){return new DiscSettings.ArtworkSource("盘面来源暂不可用");}
  }
@@ -1160,11 +1157,13 @@ public final class CdPageProbePlugin extends SpwPlugin {
  private void animateFrames(){
   if(!running)return;
   long now=System.nanoTime();
-  MediaItem item;
-  try{item=WorkshopApi.playback().getCurrentMediaItem();}catch(Exception unavailable){return;}
+  MediaItem item=null;
+  boolean playbackAvailable=true;
+  try{item=WorkshopApi.playback().getCurrentMediaItem();}
+  catch(Exception unavailable){playbackAvailable=false;}
   String song=item==null?null:item.getPath();
-  String cueSnapshot=CuePlaybackTrack.snapshot();
-  if(localDiscs!=null){localDiscs.request(song);localDiscs.resolveSlowLookup(song);}
+  String cueSnapshot=playbackAvailable?CuePlaybackTrack.snapshot():null;
+  if(playbackAvailable&&localDiscs!=null){localDiscs.request(song);localDiscs.resolveSlowLookup(song);}
   boolean sourceChanged=false;
   var display=displaySettings.getValue();
   boolean rotate=display.rotate();
@@ -1177,6 +1176,12 @@ public final class CdPageProbePlugin extends SpwPlugin {
    // native-node detach during AnimatedContent is not a sheet close/reopen.
    boolean visible=frame.presentationVisible();
    frame.syncVisibility(visible);
+   if(!playbackAvailable){
+    // Keep the current track until the host answers. Page return has its own clock.
+    frame.freezeRotation(now);
+    if(visible&&(frame.motion.closing()||frame.preparingNativeReturn.getValue()))frame.advanceMotion(now);
+    continue;
+   }
    if(!visible){frame.rotationAngle.setValue(frame.rotation.sample(song,rotate,false,false,now));continue;}
    frame.refreshReady();
    if(frame.nativeRoot==null||!frame.nativeRoot.isAttached()){
@@ -1212,8 +1217,11 @@ public final class CdPageProbePlugin extends SpwPlugin {
      frame.motion.ready(now);
     }
     frame.advanceFromTimer(now);
-    boolean canRotate=rotate&&song!=null&&frame.motion.phase()==DiscTransition.Phase.OPEN&&frame.openDiscDrawn
-      &&(frame.fallbackActive||frame.ownedCover!=null)&&display.amount()>0&&discResolved(song);
+    // The final opening pose can round to the OPEN pose. Compose may coalesce
+    // the identical draw; the animation clock must start rotation independently.
+    boolean canRotate=rotate&&display.amount()>0&&song!=null&&frame.motion.phase()==DiscTransition.Phase.OPEN
+      &&frame.ready.getValue()&&source!=null&&frame.pendingCover==null
+      &&(frame.ownedCover!=null||frame.fallbackActive||HostCoverBridge.imageReady(source))&&discResolved(song);
     if(canRotate&&playing==null)playing=playbackState.playing(this::report);
     frame.rotationAngle.setValue(frame.rotation.sample(song,rotate,canRotate&&playing,canRotate,now,display.rotationSpeed().rotationPeriod));
    }catch(Exception error){frame.rotation.sample(song,rotate,false,false,now);frame.motion.reset();frame.resetCoverHover();frame.clearReturnHandoff();frame.pose.setValue(frame.motion.pose());report("ANIMATION_ERROR "+error.getClass().getSimpleName());}

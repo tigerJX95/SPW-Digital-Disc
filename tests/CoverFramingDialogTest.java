@@ -82,7 +82,7 @@ public class CoverFramingDialogTest {
     throw new AssertionError("the framing page highlights the current album and the artwork-priority reminder");
    var vinyl=find(framingPage,JRadioButton.class,item->"黑胶／彩胶".equals(item.getText()));
    var cd=find(framingPage,JRadioButton.class,item->"CD".equals(item.getText()));
-   var reel=find(framingPage,JRadioButton.class,item->"封面磁带".equals(item.getText()));
+   var reel=find(framingPage,JRadioButton.class,item->"专辑封面开盘磁带".equals(item.getText()));
    if(!cd.isSelected())throw new AssertionError("open on the album's disc style");
    vinyl.doClick(0);
    paint(panel);
@@ -284,13 +284,15 @@ public class CoverFramingDialogTest {
   var thirdCover=new CompletableFuture<BufferedImage>();
   var missingCover=new CompletableFuture<BufferedImage>();
   var loads=Map.of("B",secondCover,"C",thirdCover,"D",missingCover);
+  var playingEntry=new AtomicReference<>(first);
+  var readCount=new java.util.concurrent.atomic.AtomicInteger();
   var workspaceRef=new AtomicReference<CoverFramingDialog.AlbumWorkspace>();
   try(var settings=new DiscSettings(manager,values->{});
-      var dialog=new CoverFramingDialog(settings,()->first,(album,color)->
+      var dialog=new CoverFramingDialog(settings,playingEntry::get,(album,color)->
           album.equals(first.key())?new VinylLabelEditor.Sample(solidCover(Color.RED),0):null)){
    try{
     SwingUtilities.invokeAndWait(()->{
-     var workspace=dialog.new AlbumWorkspace(null,entry->loads.get(entry.key().album()));
+     var workspace=dialog.new AlbumWorkspace(null,entry->{readCount.incrementAndGet();return loads.get(entry.key().album());});
      workspaceRef.set(workspace);
      // Exercise displayability checks without exposing a native window in headless tests.
      workspace.setVisible(false);
@@ -304,7 +306,10 @@ public class CoverFramingDialogTest {
      setDiscZoom(view,144);
      var hints=new ArrayList<String>();
      view.playbackHint.addPropertyChangeListener("text",event->hints.add((String)event.getNewValue()));
-     clickAlbumRow(list,1);
+     playingEntry.set(entries.get(1));
+     view.locatePlaying.doClick(0);
+     view.locatePlaying.doClick(0);
+     if(readCount.get()!=1)throw new AssertionError("repeated locate should share the in-flight cover read");
      clickAlbumRow(list,2);
      if(find(workspace,CoverFramingDialog.FramingContent.class,item->true)!=view||
          find(view,JLabel.class,item->"当前专辑：A".equals(item.getText()))==null||

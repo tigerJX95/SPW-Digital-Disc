@@ -8,11 +8,21 @@ final class CoverSelection {
  private List<Object> seen=List.of();
  private Object committed,candidate,lastAccepted;
  private long candidateAt;
- private String song;
+ private String song,previousResolvedSong;
+ private Object previousResolvedPainter;
  private boolean bound;
  void song(String next){
   if(bound&&Objects.equals(song,next))return;
-  if(bound){retired.clear();retired.addAll(seen);retired.addAll(acceptedThisSong);if(committed!=null)retired.add(committed);}
+  if(bound){
+   // An unresolved intermediate track cannot supersede the last known owner.
+   if(lastAccepted!=null){
+    retired.clear();
+    previousResolvedSong=song;
+    previousResolvedPainter=lastAccepted;
+   }
+   retired.addAll(seen);
+   retired.addAll(acceptedThisSong);
+  }
   // A decoded outgoing painter is not evidence that the new track is ready.
   // Keep its identity quarantined, but never carry its committed status forward.
   bound=true;song=next;committed=null;candidate=null;lastAccepted=null;acceptedThisSong.clear();
@@ -28,6 +38,10 @@ final class CoverSelection {
    // it is the sole live node; retiring it forever strands the native fallback.
    // Do not reopen older-song sources or alternate while both nodes are alive.
    if(fresh==null&&ready.size()==1&&(ready.get(0)==lastAccepted||acceptedThisSong.contains(ready.get(0))))fresh=ready.get(0);
+   if(fresh==null && ready.size()==1 && ready.get(0)==previousResolvedPainter
+       && song!=null && Objects.equals(song,previousResolvedSong)){
+    fresh=previousResolvedPainter;
+   }
    if(fresh==null)return null;
    commit(fresh);return committed;
   }

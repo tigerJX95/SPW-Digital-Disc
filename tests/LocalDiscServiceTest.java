@@ -8,9 +8,10 @@ import java.util.concurrent.atomic.*;
 import javax.imageio.ImageIO;
 public class LocalDiscServiceTest {
  static void check(boolean b,String why){if(!b)throw new AssertionError(why);}
- static class Asset implements AutoCloseable {
+ static class Asset implements LocalDiscService.Pixels {
   final BufferedImage png;int closed;
   Asset(byte[] bytes)throws Exception{png=ImageIO.read(new ByteArrayInputStream(bytes));}
+  public long pixelBytes(){return 4L*png.getWidth()*png.getHeight();}
   public void close(){closed++;}
  }
  static void fresh(LocalDiscService<?> service)throws Exception{var field=LocalDiscService.class.getDeclaredField("nextScan");field.setAccessible(true);field.setLong(service,0);service.poll();}
@@ -20,6 +21,26 @@ public class LocalDiscServiceTest {
   ByteArrayOutputStream out=new ByteArrayOutputStream();ImageIO.write(image,"png",out);return out.toByteArray();
  }
  static Asset get(LocalDiscService<Asset> service,String song)throws Exception{AtomicReference<Asset> value=new AtomicReference<>();service.drawFor(song,value::set);return value.get();}
+ private static void checkHostReadAfterDecode(String track)throws Exception{
+  var failRead=new AtomicBoolean();
+  var images=new ArrayList<Asset>();
+  try(var service=new LocalDiscService<Asset>(()->{
+   if(failRead.getAndSet(false))throw new IllegalStateException("temporary host read failure");
+   return track;
+  },(bytes,w,h)->{
+   var image=new Asset(bytes);
+   images.add(image);
+   failRead.set(images.size()==1);
+   return image;
+  },()->{},s->{})){
+   service.poll();
+   check(images.size()==1&&images.get(0).closed==1,"failed host read releases the unpublished image");
+   check(get(service,track)==null,"failed host read cannot publish");
+   fresh(service);
+   check(images.size()==2&&get(service,track)==images.get(1),"valid image is retried on the next scan");
+  }
+  check(images.stream().allMatch(image->image.closed==1),"each image is closed exactly once");
+ }
  private static void checkPollCannotRewindRequest(String previous,String current)throws Exception{
   var song=new AtomicReference<>(previous);
   var reads=new AtomicBoolean(true);
@@ -61,6 +82,7 @@ public class LocalDiscServiceTest {
   Files.write(two.resolve("cd.png"),png(0xffffff00));fresh(service);Asset yellow=get(service,song.get());check(yellow.png.getRGB(32,12)==0xffffff00,"new folder loads independently");
   song.set(track2.toUri().toString());fresh(service);check(get(service,song.get())!=null,"file URI supported");
   song.set("https://example.invalid/song.flac");fresh(service);check(get(service,song.get())==null,"online source does not borrow a local CD");
+  checkHostReadAfterDecode(track2.toString());
   checkPollCannotRewindRequest(track.toString(),track2.toString());
   service.close();for(Asset a:decoded)check(a.closed==1,"each retired asset closed exactly once");
   byte[] bomb=png(0xff000000);bomb[16]=0x7f;bomb[17]=(byte)0xff;bomb[18]=(byte)0xff;bomb[19]=(byte)0xff;
