@@ -5,6 +5,7 @@ import java.awt.geom.Ellipse2D;
 import java.awt.image.BufferedImage;
 import java.awt.image.DataBuffer;
 import java.awt.image.DataBufferInt;
+import java.awt.image.DataBufferByte;
 import java.io.*;
 import javax.imageio.ImageIO;
 import javax.imageio.stream.ImageInputStreamImpl;
@@ -12,8 +13,8 @@ import javax.imageio.stream.ImageInputStreamImpl;
 /** Worker-only normalization. Premultiplied alpha avoids dark transparent fringes. */
 final class DiscArtwork {
  static final int MAX_SIDE=2048;
- private DiscArtwork(){}
- static BufferedImage prepare(byte[] bytes,int width,int height)throws IOException{
+ private CircularMask mask;
+ BufferedImage prepare(byte[] bytes,int width,int height)throws IOException{
   BufferedImage source=readForDisplay(bytes,width,height);
   int decodedWidth=source.getWidth(),decodedHeight=source.getHeight();
   // Preserve transparent cutouts in full. Opaque scans use a centered square crop,
@@ -44,14 +45,74 @@ final class DiscArtwork {
    }
    // DstIn multiplies, rather than replaces, the original PNG alpha. No backing
    // color or artificial center hub is placed under custom artwork.
-   BufferedImage mask=new BufferedImage(side,side,BufferedImage.TYPE_INT_ARGB_PRE);
-   Graphics2D m=mask.createGraphics();
-   try{
-    try{m.setRenderingHint(RenderingHints.KEY_ANTIALIASING,RenderingHints.VALUE_ANTIALIAS_ON);m.setColor(Color.WHITE);m.fill(new Ellipse2D.Float(0,0,side,side));}finally{m.dispose();}
-    g.setComposite(AlphaComposite.DstIn);g.drawImage(mask,0,0,null);
-   }finally{mask.flush();}
+   if(mask==null||mask.side()!=side)mask=CircularMask.create(side);
+   mask.apply(result);
   }finally{g.dispose();source.flush();}
   return result;
+ }
+ // Most of the mask is fully opaque or clear. Retain just its coverage runs
+ // for the last display size on the decoder worker, independent of album pixels.
+ private record CircularMask(int side,int[] ends,byte[] opacity){
+  static CircularMask create(int side){
+   var image=new BufferedImage(side,side,BufferedImage.TYPE_BYTE_GRAY);
+   var g=image.createGraphics();
+   try{
+    g.setRenderingHint(RenderingHints.KEY_ANTIALIASING,RenderingHints.VALUE_ANTIALIAS_ON);
+    g.setColor(Color.WHITE);
+    g.fill(new Ellipse2D.Float(0,0,side,side));
+   }finally{g.dispose();}
+   byte[] values=((DataBufferByte)image.getRaster().getDataBuffer()).getData();
+   int count=1;
+   for(int i=1;i<values.length;i++)if(values[i]!=values[i-1])count++;
+   int[] ends=new int[count];
+   byte[] opacity=new byte[count];
+   int run=0;
+   for(int i=1;i<=values.length;i++){
+    if(i==values.length||values[i]!=values[i-1]){
+     ends[run]=i;
+     opacity[run++]=values[i-1];
+    }
+   }
+   image.flush();
+   return new CircularMask(side,ends,opacity);
+  }
+
+  void apply(BufferedImage target){
+   int[] pixels=((DataBufferInt)target.getRaster().getDataBuffer()).getData();
+   int start=0;
+   for(int run=0;run<ends.length;run++){
+    int end=ends[run],alpha=opacity[run]&255;
+    if(alpha==0)java.util.Arrays.fill(pixels,start,end,0);
+    else if(alpha!=255){
+     for(int i=start;i<end;i++){
+      int color=pixels[i];
+      pixels[i]=scale(color>>>24,alpha)<<24 | scale(color>>>16&255,alpha)<<16
+        | scale(color>>>8&255,alpha)<<8 | scale(color&255,alpha);
+     }
+    }
+    start=end;
+   }
+  }
+  private static int scale(int channel,int coverage){return (channel*coverage+127)/255;}
+ }
+
+ static byte[] readImageBytes(InputStream stream,long size)throws IOException{
+  return readImageBytes(stream,size,()->false);
+ }
+ static byte[] readImageBytes(InputStream stream,long size,java.util.function.BooleanSupplier cancelled)throws IOException{
+  if(size<=0||size>LocalDiscService.MAX_BYTES)throw new IOException("image size limit");
+  byte[] bytes=new byte[(int)size];
+  int offset=0;
+  while(offset<bytes.length){
+   if(cancelled.getAsBoolean())throw new InterruptedIOException("superseded artwork read");
+   int count=stream.read(bytes,offset,Math.min(64*1024,bytes.length-offset));
+   if(count<0)throw new EOFException("image changed while reading");
+   offset+=count;
+  }
+  if(cancelled.getAsBoolean())throw new InterruptedIOException("superseded artwork read");
+  if(stream.read()!=-1)
+   throw new IOException("image changed while reading");
+  return bytes;
  }
  // Budget the reader's actual destination raster before it is allocated.
  private static BufferedImage readForDisplay(byte[] bytes,int width,int height)throws IOException{

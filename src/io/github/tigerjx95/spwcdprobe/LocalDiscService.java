@@ -12,7 +12,7 @@ import javax.imageio.ImageIO;
 import javax.imageio.ImageReader;
 import static java.nio.file.LinkOption.NOFOLLOW_LINKS;
 /** Read-only, background disc artwork lookup. Publications and drawing share one lock. */
-final class LocalDiscService<T extends AutoCloseable> implements AutoCloseable {
+final class LocalDiscService<T extends LocalDiscService.Pixels> implements AutoCloseable {
  static final List<String> DEFAULT_NAMES=List.of("cd.png","cd.jpg","disc.png","disc.jpg");
  static List<String> candidateNames(String configured){
   if(configured==null||configured.isBlank()||configured.length()>2048)return DEFAULT_NAMES;
@@ -26,6 +26,7 @@ final class LocalDiscService<T extends AutoCloseable> implements AutoCloseable {
  }
  static final int MAX_BYTES=32*1024*1024,MAX_DIMENSION=8192;
  static final long MAX_PIXELS=16L*1024*1024;
+ interface Pixels extends AutoCloseable {long pixelBytes();}
  interface Decoder<T>{T decode(byte[] bytes,int width,int height)throws Exception;}
  interface Draw<T>{void draw(T asset)throws Exception;}
  static final long LOOKUP_WAIT_NANOS=TimeUnit.SECONDS.toNanos(2);
@@ -54,7 +55,8 @@ final class LocalDiscService<T extends AutoCloseable> implements AutoCloseable {
  private String resolvedSong;
  private boolean resolved;
  private volatile boolean closed;
- private long nextScan,generation,requestedAt;
+ private volatile long generation;
+ private long nextScan,requestedAt;
  private List<String> names=DEFAULT_NAMES;
  void setNames(List<String> candidates){
   synchronized(lock){
@@ -156,10 +158,14 @@ final class LocalDiscService<T extends AutoCloseable> implements AutoCloseable {
   finishDefault(current,ticket);
   diagnostic("LOCAL_CD_DEFAULT no usable same-directory image");
  }
+ private boolean matchesPlayback(String expected){
+  try{return Objects.equals(expected,song.get());}
+  catch(RuntimeException|LinkageError unavailable){return false;}
+ }
  private boolean scan(AlbumDirectory album,String current,long ticket,List<String> candidates,long now)throws DirectoryChanged{
   Path directory=album.path();
   for(String name:candidates){
-   if(closed||!Objects.equals(current,song.get()))return true;
+   if(closed||!matchesPlayback(current))return true;
    Path file=directory.resolve(name);Stamp observed=null;
    try{
     Stamp stamp=album.stamp(file);
@@ -173,7 +179,7 @@ final class LocalDiscService<T extends AutoCloseable> implements AutoCloseable {
     observed=stamp;
     Cached<T> cached;
     synchronized(lock){
-     if(closed||ticket!=generation||!Objects.equals(current,requestedSong)||!Objects.equals(current,song.get()))return true;
+     if(closed||ticket!=generation||!Objects.equals(current,requestedSong)||!matchesPlayback(current))return true;
      evictPathLocked(file,stamp,true);
      Rejected failed=rejected.get(file);
      // Recheck metadata on every scan. A replacement bypasses the cooldown;
@@ -193,39 +199,44 @@ final class LocalDiscService<T extends AutoCloseable> implements AutoCloseable {
     // Refuse a link even if the directory entry changed after the metadata check.
     try(InputStream in=album.read(file)){
      if(!stamp.equals(album.stamp(file)))throw new IOException("image changed before reading");
-     bytes=in.readNBytes(MAX_BYTES+1);
+     bytes=DiscArtwork.readImageBytes(in,stamp.size(),()->closed||generation!=ticket);
     }
     if(!stamp.equals(album.stamp(file)))throw new IOException("image changed while decoding");
     int[] dimensions=dimensions(bytes);
     synchronized(lock){
-     if(closed||ticket!=generation||!Objects.equals(current,requestedSong)||!Objects.equals(current,song.get()))return true;
+     if(closed||ticket!=generation||!Objects.equals(current,requestedSong)||!matchesPlayback(current))return true;
     }
     T decoded=decoder.decode(bytes,dimensions[0],dimensions[1]);
     if(decoded==null)throw new IOException("decoder returned no image");
-    // Do not cache/publish a read that raced with a file replacement.
-    try{if(!stamp.equals(album.stamp(file)))throw new IOException("image changed while decoding");}
-    catch(Exception error){closeAsset(decoded);throw error;}
-    synchronized(lock){
-     if(closed||ticket!=generation||!Objects.equals(current,requestedSong)||!Objects.equals(current,song.get())){closeAsset(decoded);return true;}
-     clearLocked();
-     // Keep one selected image per directory. Replacing a higher/lower priority
-     // candidate retires the old selection while unrelated albums stay cached.
-     for(var it=cache.entrySet().iterator();it.hasNext();){
-      var entry=it.next();
-      if(Objects.equals(entry.getKey().path().getParent(),directory))removeLocked(it,entry.getValue());
+    boolean cachedDecoded=false;
+    try{
+     if(!stamp.equals(album.stamp(file)))throw new IOException("image changed while decoding");
+     synchronized(lock){
+      if(closed||ticket!=generation||!Objects.equals(current,requestedSong)||!matchesPlayback(current))return true;
+      long cost=decoded.pixelBytes();
+      if(cost<=0||cost>CACHE_BYTES)throw new IOException("image size limit");
+      clearLocked();
+      // Keep one selected image per directory; unrelated albums stay cached.
+      for(var it=cache.entrySet().iterator();it.hasNext();){
+       var entry=it.next();
+       if(Objects.equals(entry.getKey().path().getParent(),directory))removeLocked(it,entry.getValue());
+      }
+      cache.put(stamp,new Cached<>(decoded,cost));
+      cachedDecoded=true;
+      cacheBytes+=cost;
+      while(cache.size()>CACHE_ENTRIES||cacheBytes>CACHE_BYTES){
+       var it=cache.entrySet().iterator();var entry=it.next();removeLocked(it,entry.getValue());
+      }
+      asset=decoded;publishedSong=current;publishedStamp=stamp;resolvedSong=current;resolved=true;changed.run();
      }
-     int side=Math.min(DiscArtwork.MAX_SIDE,Math.max(dimensions[0],dimensions[1]));
-     long cost=4L*side*side;cache.put(stamp,new Cached<>(decoded,cost));cacheBytes+=cost;
-     while(cache.size()>CACHE_ENTRIES||cacheBytes>CACHE_BYTES){
-      var it=cache.entrySet().iterator();var entry=it.next();removeLocked(it,entry.getValue());
-     }
-     asset=decoded;publishedSong=current;publishedStamp=stamp;resolvedSong=current;resolved=true;changed.run();
+    }finally{
+     if(!cachedDecoded)closeAsset(decoded);
     }
     diagnostic("LOCAL_CD_READY "+name+" "+dimensions[0]+"x"+dimensions[1]);return true;
    }catch(DirectoryChanged e){throw e;}
    catch(Exception|LinkageError e){
     synchronized(lock){
-     if(closed||ticket!=generation||!Objects.equals(current,requestedSong)||!Objects.equals(current,song.get()))return true;
+     if(closed||ticket!=generation||!Objects.equals(current,requestedSong)||!matchesPlayback(current))return true;
      if(observed!=null){
       rejected.put(file,new Rejected(observed,clock.getAsLong()+REJECT_RETRY_NANOS));
       trimRejectedLocked();
@@ -289,6 +300,9 @@ final class LocalDiscService<T extends AutoCloseable> implements AutoCloseable {
   }
   @Override public void close()throws IOException{stream.close();}
  }
+ static boolean allowedDimensions(int width,int height){
+  return width>0&&height>0&&width<=MAX_DIMENSION&&height<=MAX_DIMENSION&&(long)width*height<=MAX_PIXELS;
+ }
  static int[] dimensions(byte[] bytes)throws IOException{
   byte[] signature={(byte)137,80,78,71,13,10,26,10};
   if(bytes.length>MAX_BYTES||bytes.length<24)throw new IOException("image size limit");
@@ -300,14 +314,14 @@ final class LocalDiscService<T extends AutoCloseable> implements AutoCloseable {
    ImageReader reader=readers.next();
    try{
     reader.setInput(stream,true,true);int width=reader.getWidth(0),height=reader.getHeight(0);
-    if(width<1||height<1||width>MAX_DIMENSION||height>MAX_DIMENSION||(long)width*height>MAX_PIXELS)throw new IOException("image dimensions limit");
+    if(!allowedDimensions(width,height))throw new IOException("image dimensions limit");
     return new int[]{width,height};
    }finally{reader.dispose();}
   }
  }
  private void finishDefault(String current,long ticket){
   synchronized(lock){
-   if(closed||ticket!=generation||!Objects.equals(current,requestedSong)||!Objects.equals(current,song.get()))return;
+   if(closed||ticket!=generation||!Objects.equals(current,requestedSong)||!matchesPlayback(current))return;
    boolean notify=!resolved||!Objects.equals(current,resolvedSong)||asset!=null;
    retirePublicationLocked();resolvedSong=current;resolved=true;if(notify)changed.run();
   }
@@ -323,11 +337,11 @@ final class LocalDiscService<T extends AutoCloseable> implements AutoCloseable {
   }
  }
  boolean isResolved(String currentSong){
-  synchronized(lock){return !closed&&currentSong!=null&&!currentSong.isBlank()&&resolved&&Objects.equals(currentSong,resolvedSong)&&Objects.equals(currentSong,song.get());}
+  synchronized(lock){return !closed&&currentSong!=null&&!currentSong.isBlank()&&resolved&&Objects.equals(currentSong,resolvedSong)&&matchesPlayback(currentSong);}
  }
  boolean drawResolved(String currentSong,Draw<T> draw)throws Exception{
   synchronized(lock){
-   if(closed||currentSong==null||currentSong.isBlank()||!Objects.equals(currentSong,song.get()))return true;
+   if(closed||currentSong==null||currentSong.isBlank()||!matchesPlayback(currentSong))return true;
    if(asset!=null&&Objects.equals(currentSong,publishedSong)){
     try{draw.draw(asset);return true;}
     catch(Exception|LinkageError error){
@@ -344,7 +358,7 @@ final class LocalDiscService<T extends AutoCloseable> implements AutoCloseable {
  }
  boolean drawFor(String currentSong,Draw<T> draw)throws Exception{
   synchronized(lock){
-   if(closed||asset==null||!Objects.equals(currentSong,publishedSong)||!Objects.equals(currentSong,song.get()))return false;
+   if(closed||asset==null||!Objects.equals(currentSong,publishedSong)||!matchesPlayback(currentSong))return false;
    draw.draw(asset);return true;
   }
  }

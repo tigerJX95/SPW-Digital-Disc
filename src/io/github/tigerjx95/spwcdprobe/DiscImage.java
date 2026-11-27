@@ -16,7 +16,7 @@ import org.jetbrains.skia.ColorType;
 import org.jetbrains.skia.ColorAlphaType;
 import java.lang.reflect.Method;
 /** Owns decoded local pixels. The service lock prevents close while drawing. */
-final class DiscImage implements AutoCloseable {
+final class DiscImage implements LocalDiscService.Pixels {
  private static final Method DRAW_IMAGE;
  static{
   try{DRAW_IMAGE=DrawScope.class.getMethod("drawImage-9jGpkUE",ImageBitmap.class,long.class,long.class,long.class,long.class,float.class,DrawStyle.class,ColorFilter.class,int.class);}
@@ -38,8 +38,12 @@ final class DiscImage implements AutoCloseable {
    return null;
   }
  }
- static DiscImage decode(byte[] bytes,int width,int height)throws Exception{
-  var prepared=DiscArtwork.prepare(bytes,width,height);
+ static LocalDiscService.Decoder<DiscImage> decoder(){
+  var artwork=new DiscArtwork();
+  return (bytes,width,height)->decode(artwork,bytes,width,height);
+ }
+ private static DiscImage decode(DiscArtwork artwork,byte[] bytes,int width,int height)throws Exception{
+  var prepared=artwork.prepare(bytes,width,height);
   try{bytes=DiscArtwork.pixels(prepared);width=height=prepared.getWidth();}finally{prepared.flush();}
   Bitmap bitmap=null;
   try{
@@ -67,6 +71,7 @@ final class DiscImage implements AutoCloseable {
   }finally{if(bitmap!=null)bitmap.close();}
  }
  Image snapshot(){return Image.Companion.makeFromBitmap(nativeBitmap);}
+ @Override public long pixelBytes(){return 4L*width*height;}
  float aspect(){return (float)width/height;}
  CoverWhiteBorders.Bounds labelBounds(VinylLabelFraming.Crop crop){return crop.pixels(width,height);}
  java.awt.image.BufferedImage labelPreview(){return labelPreview(nativeBitmap);}

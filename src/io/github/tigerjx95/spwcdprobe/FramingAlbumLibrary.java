@@ -137,8 +137,7 @@ final class FramingAlbumLibrary {
     var file=candidates.get(name);
     if(file==null)continue;
     try(var stream=Files.newInputStream(file,NOFOLLOW_LINKS)){
-     if(Files.size(file)>LocalDiscService.MAX_BYTES)continue;
-     var image=decode(stream.readNBytes(LocalDiscService.MAX_BYTES+1),size);
+     var image=decode(DiscArtwork.readImageBytes(stream,Files.size(file)),size);
      if(image!=null)return image;
     }catch(IOException|RuntimeException unavailable){/* Try the next matching cover. */}
    }
@@ -153,37 +152,32 @@ final class FramingAlbumLibrary {
  }
 
  static BufferedImage decode(byte[] bytes,int maxSize){
-  if(bytes==null||bytes.length==0||bytes.length>LocalDiscService.MAX_BYTES)return null;
-  try{
-   var image=decodeImageIo(bytes,maxSize);
-   if(image!=null)return image;
+  if(bytes==null||bytes.length==0||bytes.length>LocalDiscService.MAX_BYTES||maxSize<1)return null;
+  try(var input=new DiscArtwork.ArtworkInput(bytes)){
+   var readers=ImageIO.getImageReaders(input);
+   if(readers.hasNext()){
+    var reader=readers.next();
+    try{
+     reader.setInput(input,true,true);
+     int width=reader.getWidth(0),height=reader.getHeight(0);
+     if(!LocalDiscService.allowedDimensions(width,height))return null;
+     var preview=readPreview(reader,width,height,maxSize);
+     if(preview!=null)return preview;
+    }finally{reader.dispose();}
+   }
   }catch(IOException|RuntimeException unavailable){/* Try the host's image codec. */}
   try(var encoded=Image.Companion.makeFromEncoded(bytes)){
-   if(encoded==null||!previewDimensions(encoded.getWidth(),encoded.getHeight())
-       ||(long)encoded.getWidth()*encoded.getHeight()>LocalDiscService.MAX_PIXELS)return null;
+   if(encoded==null||!LocalDiscService.allowedDimensions(encoded.getWidth(),encoded.getHeight()))return null;
    return DiscImage.labelPreview(encoded,maxSize);
   }catch(RuntimeException|LinkageError invalid){return null;}
  }
- private static BufferedImage decodeImageIo(byte[] bytes,int maxSize)throws IOException{
-  try(var input=new DiscArtwork.ArtworkInput(bytes)){
-   var readers=ImageIO.getImageReaders(input);
-   if(!readers.hasNext())return null;
-   var reader=readers.next();
-   try{
-    reader.setInput(input,true,true);
-    int width=reader.getWidth(0),height=reader.getHeight(0);
-    if(!previewDimensions(width,height))return null;
-    var parameters=reader.getDefaultReadParam();
-    int step=Math.max(1,Math.max(width,height)/maxSize);
-    parameters.setSourceSubsampling(step,step,0,0);
-    var image=reader.read(0,parameters);
-    if(image==null||Math.max(width,height)<=maxSize)return image;
-    try{return scaled(image,width,height,maxSize);}finally{image.flush();}
-   }finally{reader.dispose();}
-  }
- }
- private static boolean previewDimensions(int width,int height){
-  return width>0&&height>0&&width<=LocalDiscService.MAX_DIMENSION&&height<=LocalDiscService.MAX_DIMENSION;
+ private static BufferedImage readPreview(javax.imageio.ImageReader reader,int width,int height,int maxSize)throws IOException{
+  var parameters=reader.getDefaultReadParam();
+  int step=Math.max(1,Math.max(width,height)/maxSize);
+  parameters.setSourceSubsampling(step,step,0,0);
+  var image=reader.read(0,parameters);
+  if(image==null||Math.max(width,height)<=maxSize)return image;
+  try{return scaled(image,width,height,maxSize);}finally{image.flush();}
  }
  static BufferedImage scaled(BufferedImage image,int width,int height,int maxSize){
   int edge=Math.max(width,height);

@@ -28,6 +28,7 @@ public class FramingAlbumLibraryTest {
   check(preview.getWidth()==480&&preview.getHeight()==320,"cover preview preserves the original aspect");
   var thumbnail=FramingAlbumLibrary.decode(bytes,42);
   check(thumbnail.getWidth()==42&&thumbnail.getHeight()==28,"album list loads small thumbnails");
+  checkPreviewPixelLimit();
   check(FramingAlbumLibrary.decode(new byte[]{1,2,3},48)==null,"invalid artwork degrades to no cover");
   check(FramingAlbumLibrary.pairedCrop(coverWithMargins(10)).equals(new VinylLabelFraming.Crop(100,0,100,0)),
       "first album uses its own 10 percent white margins");
@@ -38,6 +39,18 @@ public class FramingAlbumLibraryTest {
   checkCoverSources(first.key(),bytes);
   checkMultidiscCover();
   System.out.println("PASS album grouping, search, bounded preview decoding, failed track lookup fallback and same-directory covers");
+ }
+
+ private static void checkPreviewPixelLimit()throws Exception{
+  for(int width:new int[]{4096,4097}){
+   var image=new BufferedImage(width,4096,BufferedImage.TYPE_BYTE_BINARY);
+   var bytes=new java.io.ByteArrayOutputStream();
+   try{ImageIO.write(image,"png",bytes);}finally{image.flush();}
+   var preview=FramingAlbumLibrary.decode(bytes.toByteArray(),42);
+   try{
+    check((preview!=null)==(width==4096),"preview must enforce the source pixel budget before subsampling");
+   }finally{if(preview!=null)preview.flush();}
+  }
  }
 
  private static void checkCoverSources(DiscSettings.AlbumKey album,byte[] embedded)throws Exception{

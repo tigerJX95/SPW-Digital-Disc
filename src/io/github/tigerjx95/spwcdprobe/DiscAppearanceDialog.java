@@ -187,7 +187,7 @@ public final class DiscAppearanceDialog implements AutoCloseable {
   var reelPalette=new JPanel(new GridLayout(0,3,8,8));
   reelPalette.setOpaque(false);
   reelPalette.setBorder(BorderFactory.createEmptyBorder(8,0,0,0));
-  reelPalette.getAccessibleContext().setAccessibleName("卷盘颜色");
+  reelPalette.getAccessibleContext().setAccessibleName("开盘磁带颜色");
   for(var color:DiscSettings.ReelColor.values()){
    var button=option(color.label,color.name(),reelColors,color==initial.reelColor(),
      color==DiscSettings.ReelColor.RANDOM?null:new Color(color.rgb));
@@ -201,7 +201,7 @@ public final class DiscAppearanceDialog implements AutoCloseable {
   var reelSection=new JPanel(new GridLayout(1,2,8,0));
   reelSection.setOpaque(false);
   reelSection.setBorder(BorderFactory.createEmptyBorder(14,0,0,0));
-  reelSection.getAccessibleContext().setAccessibleName("卷盘外观");
+  reelSection.getAccessibleContext().setAccessibleName("开盘磁带外观");
   reelSection.add(option("纯色",DiscSettings.Style.REEL.name(),reelOptions,
       initial.style()!=DiscSettings.Style.REEL_COVER,null));
   reelSection.add(option("专辑封面",DiscSettings.Style.REEL_COVER.name(),reelOptions,

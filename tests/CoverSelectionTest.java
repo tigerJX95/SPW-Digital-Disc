@@ -14,6 +14,29 @@ public class CoverSelectionTest {
   check(c.select(List.of(a,d),a,t+3_000_000_000L)==d,"older-than-previous source cannot return");
   c.song("same album");check(c.select(List.of(d),d,t+4_000_000_000L)==null,"unchanged old painter alone cannot prove new-song ownership");
   check(c.select(List.of(),null,t+5_000_000_000L)==null,"detached catalog cannot return stale painter");
+  rapidSwitchAcrossEmptySongs();
   System.out.println("PASS outgoing/incoming settle, 100 alternating capture/order frames without ping-pong, historical-node retirement, latest incoming, old-identity quarantine and detached source cleanup");
+ }
+
+ private static void rapidSwitchAcrossEmptySongs(){
+  CoverSelection selection = new CoverSelection();
+  Object outgoing = new Object();
+  Object incoming = new Object();
+  long now = 1_000_000_000L;
+  selection.song("A");
+  check(selection.select(List.of(outgoing), outgoing, now++) == outgoing, "first track owns its painter");
+  selection.song("B");
+  check(selection.select(List.of(), null, now++) == null, "intermediate track is still loading");
+  selection.song("C");
+  check(selection.select(List.of(outgoing), outgoing, now++) == null, "late A painter must not become C after an empty B");
+  selection.song("D");
+  check(selection.select(List.of(), outgoing, now++) == null, "late callback alone cannot produce an image");
+  selection.song("A");
+  check(selection.select(List.of(outgoing), outgoing, now++) == outgoing, "returning to A can reuse its sole known painter");
+  selection.song("B");
+  selection.select(List.of(), null, now++);
+  selection.song("C");
+  check(selection.select(List.of(outgoing, incoming), outgoing, now++) == incoming, "fresh C painter wins immediately despite stale capture");
+  check(selection.select(List.of(outgoing), outgoing, now++) == null, "losing C cannot revive A");
  }
 }
