@@ -49,7 +49,7 @@ body:
         请填写 SPW Digital Disc 的版本，可在播放器的插件页面查看。
 
         Enter the SPW Digital Disc version shown on the player’s Plugins page.
-      placeholder: 例如 / e.g. v1.13.0
+      placeholder: 例如 / e.g. v1.16.0  # plugin-version
     validations:
       required: true
 
@@ -102,6 +102,6 @@ body:
     attributes:
       label: 📸 截图、日志或补充信息 / Screenshots, Logs, or Additional Context
       description: |
-        可附上截图、录屏或相关日志。上传前请移除个人信息。
+        可附上截图、录屏或相关日志。启动或旋转异常时，可从插件目录的 cd-sample.log 摘录 HOST_DETECTED 及同次故障附近的几行。上传前请移除个人信息。
 
-        Attach any relevant screenshots, screen recordings, or logs. Remove personal information before uploading.
+        Attach any relevant screenshots, screen recordings, or logs. For startup or rotation issues, include HOST_DETECTED and nearby failure entries from cd-sample.log in the plugin directory. Remove personal information before uploading.

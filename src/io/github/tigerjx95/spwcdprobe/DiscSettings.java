@@ -20,6 +20,7 @@ final class DiscSettings implements AutoCloseable {
  static final String LEGACY_TRIM_COVER_KEY="trim_cover_white_borders";
  static final String ROTATION_SPEED_KEY="disc_rotation_speed";
  static final String LOCAL_NAMES_KEY="disc_local_names";
+ static final int VINYL_COLOR_SALT=java.util.concurrent.ThreadLocalRandom.current().nextInt();
  enum VinylColor {
   BLACK("黑色",0x555555), BLUE("海洋蓝",0x25b5d6), GREEN("翡翠绿",0x4ec68b),
   AMBER("琥珀金",0xf3b950), PURPLE("鸢尾紫",0xb98de1), PINK("樱花粉",0xf4a8cb), RED("玫瑰红",0xd25970), RANDOM("随机色",0x25b5d6);
@@ -200,10 +201,10 @@ final class DiscSettings implements AutoCloseable {
  }
  DiscSettings(ConfigManager manager,Consumer<Values> update,Supplier<ArtworkSource> artworkSource,Supplier<AlbumKey> playingAlbum,
      Consumer<Appearance> prepareDefault){
-  this(manager,update,artworkSource,playingAlbum,prepareDefault,(album,color)->null);
+  this(manager,update,artworkSource,playingAlbum,prepareDefault,(album,color)->null,new PlayingCoverPreview(entry->FramingAlbumLibrary.cover(entry,480)));
  }
  DiscSettings(ConfigManager manager,Consumer<Values> update,Supplier<ArtworkSource> artworkSource,Supplier<AlbumKey> playingAlbum,
-     Consumer<Appearance> prepareDefault,BiFunction<AlbumKey,VinylColor,VinylLabelEditor.Sample> labelSample){
+     Consumer<Appearance> prepareDefault,BiFunction<AlbumKey,VinylColor,VinylLabelEditor.Sample> labelSample,PlayingCoverPreview previews){
   this.manager=manager;this.update=update;
   try{
    appearanceConfig=manager.getConfig(APPEARANCE_CONFIG);
@@ -216,8 +217,11 @@ final class DiscSettings implements AutoCloseable {
    update.accept(read(runtimeConfig));
    orderDialog=new DiscOrderDialog(this,artworkSource);
    appearanceDialog=new DiscAppearanceDialog(this,playingAlbum,artworkSource,prepareDefault);
-   framingDialog=new CoverFramingDialog(this,FramingAlbumLibrary::playingEntry,labelSample);
-  }catch(RuntimeException error){close();throw error;}
+   framingDialog=new CoverFramingDialog(this,FramingAlbumLibrary::playingEntry,labelSample,previews);
+  }catch(RuntimeException|LinkageError error){
+   try{close();}catch(RuntimeException|LinkageError cleanup){if(cleanup!=error)error.addSuppressed(cleanup);}
+   throw error;
+  }
  }
  private Values read(ConfigHelper config){
   int amount;boolean front;

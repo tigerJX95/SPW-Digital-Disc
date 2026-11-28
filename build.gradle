@@ -1,8 +1,13 @@
+import java.util.regex.Matcher
+
 // Local Java build route; use the existing JDK25 / Gradle9.8 toolchain.
 // Host dependencies are compileOnly and are never bundled in the plugin.
 plugins { id 'java' }
 group = 'io.github.tigerjx95.spwcd'
-version = '1.15.0'
+version = file('plugin/MANIFEST.MF').withInputStream {
+    new java.util.jar.Manifest(it).mainAttributes.getValue('Plugin-Version')
+}
+if (!version || version == 'unspecified') throw new GradleException('Missing Plugin-Version in plugin/MANIFEST.MF')
 def host = providers.gradleProperty('saltPlayerArchive')
 java { sourceCompatibility = JavaVersion.VERSION_21; targetCompatibility = JavaVersion.VERSION_21 }
 sourceSets.main.java.srcDirs = ['src']
@@ -12,8 +17,22 @@ tasks.register('verifyHost', Exec) {
     commandLine (System.getProperty('os.name').toLowerCase().contains('windows') ? 'python' : 'python3'), 'scripts/verify_host.py', host.getOrElse('MISSING_HOST')
 }
 tasks.named('compileJava') { dependsOn 'verifyHost' }
+// Keep the checked-in GitHub form in sync with the installable package.
+def bugForm = layout.projectDirectory.file('.github/ISSUE_TEMPLATE/01-bug-report.yml').asFile
+def pluginVersion = version.toString()
+tasks.register('syncBugReportVersion') {
+    inputs.property('pluginVersion', pluginVersion)
+    outputs.file(bugForm)
+    doLast {
+        def original = bugForm.getText('UTF-8')
+        def example = original =~ /(?m)^( +placeholder: 例如 \/ e\.g\. v)\S+( +# plugin-version)(?=\r?$)/
+        if (example.count != 1) throw new GradleException('Expected one marked plugin version example in ' + bugForm.name)
+        def updated = example.replaceFirst('$1' + Matcher.quoteReplacement(pluginVersion) + '$2')
+        if (updated != original) bugForm.setText(updated, 'UTF-8')
+    }
+}
 tasks.register('plugin', Zip) {
-    dependsOn 'compileJava'
+    dependsOn 'compileJava', 'syncBugReportVersion'
     archiveFileName = "SPW_Digital_Disc_v${project.version}.spmod"
     destinationDirectory = layout.projectDirectory.dir('dist')
     from(layout.buildDirectory.dir('classes/java/main')) { into 'classes' }

@@ -128,8 +128,9 @@ final class DiscSurfaceRaster<C extends Enum<C>> implements AutoCloseable {
   closed=true;
   worker.shutdownNow();
   requested=null;pending=null;retryAt.clear();
-  if(ready!=null){ready.close();ready=null;}
-  readyColor=null;
+  Raster previous=ready;
+  ready=null;readyColor=null;
+  if(previous!=null)previous.close();
  }
 
  private static Raster bakeReel(DiscSettings.ReelColor color)throws Exception{

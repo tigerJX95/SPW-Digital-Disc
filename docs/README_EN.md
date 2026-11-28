@@ -4,13 +4,12 @@
 
 Adds a digital CD presentation to Salt Player (SPW), with a complete album cover and a CD extending from its right side.
 
-Current release **v1.15.0**
+Current release **v1.16.0**
 
-- Fixed an occasional pause between the end of ejection and the start of rotation during playback. With rotation enabled, acceleration starts when ejection finishes and reaches the selected speed in about 240 ms.
-- Improved cover handling during rapid track changes. For example, switching from A to B and back before B has loaded can reuse the cover the player provides for A. A temporary playback read failure preserves the cover and angle and allows retraction to finish.
-- Tuned custom artwork loading and caching. Switching tracks can interrupt an obsolete file read. Cache accounting uses the actual display copy size, and equal-sized disc images can reuse their circular edge mask.
-- Applied the same source dimension checks to framing thumbnails and previews. A 4096 × 4096 PNG meets the pixel limit. A 4097 × 4096 image is skipped so the next available cover can be tried. Fixed an image resource leak when the current track could not be confirmed after decoding.
-- Standardized open-reel tape names across album settings and framing. The album dialog shows “全局默认 · 随机色开盘磁带” for the global random-color setting, and the framing editor labels the album-cover variant “专辑封面开盘磁带”.
+- The framing editor opens centered in the player. Drag the empty space above the preview to move it. The preview and footer buttons stay in place when the album list opens or closes.
+- During playback the plugin prepares the current track’s cover preview in the background. Ready artwork appears with the editor. If the track has just changed or artwork is still loading, you can use the window while the image loads.
+- Startup diagnostics identify missing permissions or the initialization step that failed. A playback state read failure and its recovery each produce one log entry per outage.
+- Startup rollback and shutdown release settings listeners and drawing hooks. If a disc surface fails to close, cleanup continues with the remaining resources.
 
 [Update history](CHANGELOG.md) (Chinese)
 
@@ -48,9 +47,9 @@ https://github.com/user-attachments/assets/8a289172-d79b-4e2e-9ba2-c7dc9ee5d86c
 
 ## Installation and use
 
-Version 1.15.0 passed interface checks against the SPW 1.19.3 Microsoft Store host archive and 56 offline regression programs. For version-specific Windows and Ubuntu host test results, see the [release history](CHANGELOG.md).
+This candidate targets the supported SPW 1.19.0 and 1.19.3 builds. For real-player test results from previous releases, see the [release history](CHANGELOG.md).
 
-1. Extract `SPW_Digital_Disc_v1.15.0.spmod` from the release ZIP. See the build instructions below to compile it yourself.
+1. Extract `SPW_Digital_Disc_v1.16.0.spmod` from the release ZIP. See the build instructions below to compile it yourself.
 2. In SPW's plugin manager, use the local plugin import option to select the `.spmod` file.
 3. Grant `class-transform` and `library-read` when prompted, enable the plugin, and restart SPW.
 4. Play a song from the local machine or an accessible network share. Click the bottom playback bar to open the primary detail page, then click the album cover to open the secondary display page.
@@ -65,6 +64,8 @@ Collapsing the entire playback detail page or disabling the plugin cancels unfin
 ## Cover cropping and disc framing
 
 Open **封面裁切与盘面取景** (Cover Cropping and Disc Framing) in the plugin settings. Both tabs change how artwork appears on the secondary display. The original artwork file stays intact.
+
+The editor opens centered in the visible part of the player. Drag the empty space between the tabs and **Go to Playing Album** to move it. The album picker opens beside the editor. Opening or closing the list keeps the preview and footer buttons in place. The list prefers the right side and uses the left side or the screen edge when space is limited. Click **收起列表** (Hide List) to dismiss it.
 
 The window opens with a preview of the album currently playing. After playback moves to another album, click **定位正在播放的专辑** (Go to Playing Album) at the upper right of either tab to switch the preview and edit that album. If the next track is on the same album, the button reloads that track's cover. Each album keeps its own draft until you click **Confirm** to save them together.
 
@@ -161,11 +162,27 @@ The disc and its reflection rotate together. With playback active, acceleration 
 - If playback state cannot be read, rotation stops and logs `ROTATION_STATE_UNAVAILABLE`; artwork display retains its existing behavior.
 - Window sizes, display scaling and rapid page changes depend on host behavior. Report problems using the repository's Issue templates.
 
+### Troubleshooting in v1.16.0
+
+Open `cd-sample.log` in the plugin directory and copy the entries from the affected startup or playback interval.
+
+| Symptom | Log entry | Action |
+| --- | --- | --- |
+| Host compatibility check fails | `HOST_REJECTED stage=host-profile` | Include this entry and the preceding `HOST_DETECTED` entry for the plugin version, host version, channel and OS. |
+| A permission is missing | `START_FAILED stage=permissions missing=library-read` | Grant the listed permission in the host and enable the plugin again. Both permissions appear when both are missing. |
+| Startup fails after granting permissions | `START_FAILED stage=cover-status-hook cause=…` | Include the entry and the host information. This example identifies cover status hook initialization. |
+| Rotation freezes during playback | `ROTATION_STATE_UNAVAILABLE stage=read` | One entry covers a continuous outage. A successful read produces `ROTATION_STATE_RECOVERED`. If playback is paused at recovery, the disc waits until playback resumes. |
+| Releasing a resource fails during shutdown | `STOP_WARNING stage=reel-raster cause=…` | This example identifies the reel texture. Cleanup continues with the remaining surfaces and draw hooks. Include this entry and the nearby shutdown lines when reporting the problem. |
+
+A rotation error with `stage=bind` identifies a failure to bind the playback state interface. Include the host information when reporting it.
+
 ## Implementation
 
 The plugin is written in **Java** and uses the SPW plugin API, Compose drawing, and Skia image decoding. It connects through the identified `FullScreenCover` entry point and renders the complete cover and CD in an independent Canvas. Disc images are read asynchronously. Compose observable state coordinates the transition from the native cover to the custom display.
 
 ## Build an installation package from source
+
+Set `Plugin-Version` in `plugin/MANIFEST.MF` when changing versions. Building the plugin uses this version for the package filename and updates the plugin version example in the GitHub bug report form.
 
 These steps generate a `.spmod` plugin. You do not need these development tools to install and use a prebuilt plugin.
 
@@ -228,7 +245,7 @@ If using PowerShell, configure the same environment variables and run this in th
 After the build reports `BUILD SUCCESSFUL`, look in the source directory's `dist` folder for:
 
 ```text
-SPW_Digital_Disc_v1.15.0.spmod
+SPW_Digital_Disc_v1.16.0.spmod
 ```
 
 This is the installation package that SPW can import. You do not need to ZIP the entire source directory or rename its extension. The `build` directory contains intermediate build output, not the installation package.

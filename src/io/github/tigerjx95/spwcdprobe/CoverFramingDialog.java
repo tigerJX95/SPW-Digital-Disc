@@ -2,6 +2,8 @@ package io.github.tigerjx95.spwcdprobe;
 
 import java.awt.*;
 import java.awt.event.ItemEvent;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.awt.image.BufferedImage;
@@ -30,14 +32,16 @@ public final class CoverFramingDialog implements AutoCloseable {
  private final DiscSettings settings;
  private final Supplier<FramingAlbumLibrary.Entry> playingEntry;
  private final BiFunction<DiscSettings.AlbumKey,DiscSettings.VinylColor,VinylLabelEditor.Sample> sampleFor;
+ private final PlayingCoverPreview previews;
  private AlbumWorkspace workspace;
  private boolean saving;
 
  CoverFramingDialog(DiscSettings settings,Supplier<FramingAlbumLibrary.Entry> playingEntry,
-     BiFunction<DiscSettings.AlbumKey,DiscSettings.VinylColor,VinylLabelEditor.Sample> sampleFor){
+     BiFunction<DiscSettings.AlbumKey,DiscSettings.VinylColor,VinylLabelEditor.Sample> sampleFor,PlayingCoverPreview previews){
   this.settings=settings;
   this.playingEntry=playingEntry;
   this.sampleFor=sampleFor;
+  this.previews=previews;
   active=this;
  }
 
@@ -50,7 +54,7 @@ public final class CoverFramingDialog implements AutoCloseable {
 
  private void show(){
   if(workspace!=null&&workspace.dialog.isDisplayable()){workspace.dialog.toFront();return;}
-  var owner=KeyboardFocusManager.getCurrentKeyboardFocusManager().getActiveWindow();
+  var owner=playerWindow();
   var dialog=new JDialog(owner,TITLE,Dialog.ModalityType.MODELESS);
   dialog.setUndecorated(true);
   dialog.getRootPane().setWindowDecorationStyle(JRootPane.NONE);
@@ -66,13 +70,49 @@ public final class CoverFramingDialog implements AutoCloseable {
     if(CoverFramingDialog.this.workspace==workspace)CoverFramingDialog.this.workspace=null;
    }
   });
+  workspace.openPlayingAlbum();
   dialog.setContentPane(workspace);
-  dialog.pack();
-  dialog.setLocationRelativeTo(owner);
+  workspace.fitWindow();
   dialog.setVisible(true);
   var root=dialog.getRootPane();
   root.paintImmediately(0,0,root.getWidth(),root.getHeight());
-  Toolkit.getDefaultToolkit().sync();
+
+ }
+
+ private static Window playerWindow(){
+  var focus=KeyboardFocusManager.getCurrentKeyboardFocusManager();
+  Window window=focus.getActiveWindow();
+  if(window==null)window=focus.getFocusedWindow();
+  if(window!=null){
+   while(window.getOwner()!=null&&window.getOwner().isShowing())window=window.getOwner();
+   return window;
+  }
+  for(Frame frame:Frame.getFrames())if(frame.isShowing()&&(frame.getExtendedState()&Frame.ICONIFIED)==0)return frame;
+  return null;
+ }
+
+ static Rectangle fittedBounds(Dimension preferred,Rectangle screen,Rectangle owner){
+  Rectangle area=owner==null?screen:screen.intersection(owner);
+  if(area.isEmpty())area=screen;
+  int margin=Math.min(10,Math.min(area.width,area.height)/8);
+  int w=Math.min(preferred.width,area.width-2*margin);
+  int h=Math.min(preferred.height,area.height-2*margin);
+  return new Rectangle(area.x+(area.width-w)/2,area.y+(area.height-h)/2,w,h);
+ }
+
+ static Rectangle pickerBounds(Rectangle editor,Rectangle screen,int preferredWidth){
+  int width=Math.min(preferredWidth,screen.width),height=Math.min(editor.height,screen.height);
+  int left=editor.x-screen.x,right=screen.x+screen.width-editor.x-editor.width;
+  int x=right>=width||right>=left?editor.x+editor.width:editor.x-width;
+  return new Rectangle(Math.clamp(x,screen.x,screen.x+screen.width-width),
+      Math.clamp(editor.y,screen.y,screen.y+screen.height-height),width,height);
+ }
+
+ private static Rectangle usableScreen(GraphicsConfiguration display){
+  var screen=display.getBounds();
+  var insets=Toolkit.getDefaultToolkit().getScreenInsets(display);
+  return new Rectangle(screen.x+insets.left,screen.y+insets.top,
+      screen.width-insets.left-insets.right,screen.height-insets.top-insets.bottom);
  }
 
  private FramingAlbumLibrary.Entry readPlayingEntry(){
@@ -86,14 +126,14 @@ public final class CoverFramingDialog implements AutoCloseable {
   saving=true;
   var dialog=workspace.dialog;
   workspace.cancelCoverRequest();
-  workspace.picker.finishSearchInput();
+  workspace.finishSearchInput();
   dialog.setCursor(Cursor.getPredefinedCursor(Cursor.WAIT_CURSOR));
   DiscAppearanceDialog.runSave(()->settings.saveCoverFraming(mode,albums,presets),saved->{
    saving=false;
    if(active!=this||workspace.closed||!dialog.isDisplayable())return;
    if(saved){workspace.requestClose();return;}
    dialog.setCursor(Cursor.getDefaultCursor());
-   workspace.picker.finishSearchInput();
+   workspace.finishSearchInput();
    JOptionPane.showMessageDialog(dialog,"无法保存封面裁切与盘面取景。","保存失败",JOptionPane.ERROR_MESSAGE);
   });
  }
@@ -106,7 +146,8 @@ public final class CoverFramingDialog implements AutoCloseable {
   private final CoverFraming original=settings.coverFraming();
   private final Map<AlbumKey,AlbumFraming> drafts=new LinkedHashMap<>();
   private final LinkedHashMap<AlbumKey,VinylLabelEditor.Sample> covers=new LinkedHashMap<>(12,.75f,true);
-  private final FramingAlbumPicker picker;
+  private FramingAlbumPicker picker;
+  private JDialog pickerWindow;
   private final Timer retry=new Timer(350,event->retryCurrent());
   private AlbumKey selectedAlbum;
   private FramingAlbumLibrary.Entry selectedEntry;
@@ -114,23 +155,51 @@ public final class CoverFramingDialog implements AutoCloseable {
   private CoverRequest pendingCover;
   private int attempts;
   private boolean hasCover,readingCover,closed;
+  private boolean opening=true;
 
   AlbumWorkspace(JDialog dialog,Function<FramingAlbumLibrary.Entry,CompletionStage<BufferedImage>> loadCover){
    super(new BorderLayout());
    setBackground(BACKGROUND);
    this.dialog=dialog;
    this.loadCover=loadCover;
-   selectedEntry=readPlayingEntry();
-   selectedAlbum=selectedEntry==null?null:selectedEntry.key();
-   picker=new FramingAlbumPicker(selectedEntry,this::editAlbum);
-   picker.setVisible(false);
-   add(picker,BorderLayout.EAST);
-   var preview=sample(selectedAlbum);
-   rebuild(original.mode(),0,null,preview);
-   if(selectedEntry!=null){
-    if(preview==null)selectAlbum(selectedEntry,false);
-    else picker.setThumbnail(selectedEntry,preview.image());
+  }
+
+  void openPlayingAlbum(){
+   var entry=readPlayingEntry();
+   if(entry==null){
+    opening=false;
+    rebuild(original.mode(),0,null,null);
+    return;
    }
+   var result=previews.forOpening(entry);
+   var image=result.getNow(null);
+   if(image!=null){
+    opening=false;
+    selectedEntry=entry;
+    selectedAlbum=entry.key();
+    var preview=artworkSample(entry,image);
+    cache(selectedAlbum,preview);
+    rebuild(original.mode(),0,null,preview);
+    return;
+   }
+   rebuild(original.mode(),0,null,null);
+   var request=new CoverRequest(entry,false);
+   pendingCover=request;
+   result.thenAccept(artwork->SwingUtilities.invokeLater(()->{
+    if(closed||saving||pendingCover!=request)return;
+    opening=false;
+    if(artwork!=null)coverLoaded(request,artwork);
+    else selectAlbum(entry,false);
+   }));
+  }
+
+  FramingAlbumPicker albumPicker(){
+   if(picker==null){
+    picker=new FramingAlbumPicker(selectedEntry,this::editAlbum);
+    var preview=covers.get(selectedAlbum);
+    if(preview!=null)picker.setThumbnail(selectedEntry,preview.image());
+   }
+   return picker;
   }
 
   private Appearance appearance(AlbumKey album){
@@ -156,12 +225,12 @@ public final class CoverFramingDialog implements AutoCloseable {
    if(view!=null)remove(view);
    hasCover=sample!=null;
    AlbumKey album=selectedAlbum!=null&&selectedAlbum.album()!=null?selectedAlbum:null;
-   view=content(mode,album,framing(album),sample,appearance(selectedAlbum).style(),
+   view=content(mode,album,framing(album),sample,opening?Style.CD:appearance(selectedAlbum).style(),
        (next,current)->{
         if(closed)return;
         remember(album,current);
         save(this,next,Map.copyOf(drafts),original.presets());
-       },()->{if(!saving)requestClose();});
+       },()->{if(!saving)requestClose();},opening);
    var choose=new ActionButton("选择专辑",false);
    choose.addActionListener(event->togglePicker());
    view.albumActions.add(choose,BorderLayout.LINE_END);
@@ -173,6 +242,7 @@ public final class CoverFramingDialog implements AutoCloseable {
     reload.addActionListener(event->selectAlbum(selectedEntry,false));
     view.actions.add(reload,1);
    }
+   if(dialog!=null)view.enableWindowDrag(dialog,this::alignPicker);
    add(view,BorderLayout.CENTER);
    revalidate();
    repaint();
@@ -180,18 +250,53 @@ public final class CoverFramingDialog implements AutoCloseable {
 
   private void togglePicker(){
    if(saving||closed)return;
-   if(!picker.isVisible())setPickerVisible(true);
-   else{
-    picker.finishSearchInput();
-    SwingUtilities.invokeLater(()->{if(!closed)setPickerVisible(false);});
+   if(pickerWindow!=null&&pickerWindow.isShowing()){hidePicker();return;}
+   var panel=albumPicker();
+   if(pickerWindow==null){
+    pickerWindow=new JDialog(dialog,"选择专辑",Dialog.ModalityType.MODELESS);
+    pickerWindow.setUndecorated(true);
+    pickerWindow.getRootPane().setWindowDecorationStyle(JRootPane.NONE);
+    pickerWindow.setBackground(panel.getBackground());
+    pickerWindow.setDefaultCloseOperation(WindowConstants.DO_NOTHING_ON_CLOSE);
+    pickerWindow.addWindowListener(new WindowAdapter(){
+     @Override public void windowClosing(WindowEvent event){hidePicker();}
+    });
+    var done=new ActionButton("收起列表",false);
+    done.addActionListener(event->hidePicker());
+    panel.add(done,BorderLayout.SOUTH);
+    panel.registerKeyboardAction(event->hidePicker(),KeyStroke.getKeyStroke("ESCAPE"),JComponent.WHEN_IN_FOCUSED_WINDOW);
+    pickerWindow.setContentPane(panel);
+    dialog.addComponentListener(new java.awt.event.ComponentAdapter(){
+     @Override public void componentMoved(java.awt.event.ComponentEvent event){if(pickerWindow.isShowing())alignPicker();}
+     @Override public void componentResized(java.awt.event.ComponentEvent event){if(pickerWindow.isShowing())alignPicker();}
+    });
    }
+   alignPicker();
+   pickerWindow.setVisible(true);
+   panel.open(FramingAlbumLibrary::albums);
   }
 
-  private void setPickerVisible(boolean visible){
-   picker.setVisible(visible);
-   if(visible)picker.open(FramingAlbumLibrary::albums);
-   dialog.pack();
-   dialog.setLocationRelativeTo(dialog.getOwner());
+  private void hidePicker(){
+   finishSearchInput();
+   SwingUtilities.invokeLater(()->{if(!closed)pickerWindow.setVisible(false);});
+  }
+
+  private void finishSearchInput(){if(picker!=null)picker.finishSearchInput();}
+
+  private void alignPicker(){
+   if(pickerWindow!=null)
+    pickerWindow.setBounds(pickerBounds(dialog.getBounds(),usableScreen(dialog.getGraphicsConfiguration()),picker.getPreferredSize().width));
+  }
+
+  private void fitWindow(){
+   var owner=dialog.getOwner();
+   boolean owned=owner!=null&&owner.isShowing();
+   var screen=usableScreen(owned?owner.getGraphicsConfiguration():dialog.getGraphicsConfiguration());
+   // Reserve space for all three framing editors before artwork is available.
+   Dimension size=getPreferredSize();
+   size.width=Math.max(694,size.width);
+   size.height=Math.max(780,size.height);
+   dialog.setBounds(fittedBounds(size,screen,owned?owner.getBounds():null));
   }
 
   private void editAlbum(FramingAlbumLibrary.Entry entry){
@@ -210,24 +315,30 @@ public final class CoverFramingDialog implements AutoCloseable {
 
   private void locatePlayingAlbum(){
    if(saving||closed)return;
+   opening=false;
    var entry=readPlayingEntry();
    if(entry==null){
     cancelCoverRequest();
     view.playbackHint.setText("暂无可定位的播放曲目");
     return;
    }
-   if(pendingCover!=null&&!pendingCover.openFraming()&&pendingCover.entry().equals(picker.coverEntry(entry)))return;
+   if(pendingCover!=null&&!pendingCover.openFraming()&&pendingCover.entry().equals(picker==null?entry:picker.coverEntry(entry)))return;
+   previews.clear();
    covers.remove(entry.key());
-   selectAlbum(entry,false);
+   selectAlbum(entry,false,entry);
   }
 
   private void selectAlbum(FramingAlbumLibrary.Entry entry,boolean openFraming){
+   selectAlbum(entry,openFraming,readPlayingEntry());
+  }
+
+  private void selectAlbum(FramingAlbumLibrary.Entry entry,boolean openFraming,FramingAlbumLibrary.Entry playing){
    if(saving||closed)return;
+   opening=false;
    cancelCoverRequest();
-   var playing=readPlayingEntry();
    boolean current=playing!=null&&entry.key().equals(playing.key());
    var first=current?playing.withAlternatives(entry):entry;
-   var request=new CoverRequest(picker.coverEntry(first),openFraming);
+   var request=new CoverRequest(picker==null?first:picker.coverEntry(first),openFraming);
    var ready=sample(entry.key());
    if(ready!=null){showAlbum(request,ready);return;}
 
@@ -254,10 +365,15 @@ public final class CoverFramingDialog implements AutoCloseable {
     return;
    }
    var album=request.entry().key();
-   var color=appearance(album).color().resolve(album.album(),album.artist(),album.artist(),album.year(),null,0);
-   var preview=new VinylLabelEditor.Sample(image,color.shade(65));
+   var preview=artworkSample(request.entry(),image);
    cache(album,preview);
    showAlbum(request,preview);
+  }
+
+  private VinylLabelEditor.Sample artworkSample(FramingAlbumLibrary.Entry entry,BufferedImage image){
+   var album=entry.key();
+   var color=appearance(album).color().resolve(album.album(),album.artist(),album.artist(),album.year(),album.path(),DiscSettings.VINYL_COLOR_SALT);
+   return new VinylLabelEditor.Sample(image,color.shade(65));
   }
 
   private void retryCurrent(){
@@ -283,16 +399,12 @@ public final class CoverFramingDialog implements AutoCloseable {
    remember(selectedAlbum,view.draft.get());
    selectedEntry=request.entry();
    selectedAlbum=selectedEntry.key();
-   picker.setEditingAlbum(selectedEntry);
-   if(preview!=null)picker.setThumbnail(selectedEntry,preview.image());
-   boolean restoreEditorSize=!hasCover&&preview!=null;
-   int tab=request.openFraming()?1:view.tabs.getSelectedIndex();
-   rebuild(selected(view.modes),tab,view.selectedStyle(),preview);
-   if(restoreEditorSize&&dialog!=null){
-    var preferred=dialog.getPreferredSize();
-    if(dialog.getWidth()<preferred.width||dialog.getHeight()<preferred.height)
-     dialog.setSize(Math.max(dialog.getWidth(),preferred.width),Math.max(dialog.getHeight(),preferred.height));
+   if(picker!=null){
+    picker.setEditingAlbum(selectedEntry);
+    if(preview!=null)picker.setThumbnail(selectedEntry,preview.image());
    }
+   int tab=request.openFraming()?1:view.tabs.getSelectedIndex();
+   rebuild(selected(view.modes),tab,hasCover?view.selectedStyle():null,preview);
   }
 
   private AlbumFraming framing(AlbumKey album){
@@ -307,7 +419,7 @@ public final class CoverFramingDialog implements AutoCloseable {
 
   private void requestClose(){
    if(closed)return;
-   picker.finishSearchInput();
+   finishSearchInput();
    close();
    // Let queued input-method callbacks run while the native window still exists.
    SwingUtilities.invokeLater(dialog::dispose);
@@ -317,7 +429,7 @@ public final class CoverFramingDialog implements AutoCloseable {
    if(closed)return;
    closed=true;
    cancelCoverRequest();
-   picker.close();
+   if(picker!=null)picker.close();
    covers.clear();
   }
  }
@@ -339,11 +451,47 @@ public final class CoverFramingDialog implements AutoCloseable {
     if(option.getActionCommand().equals(style.name())){option.setSelected(true);return;}
    }
   }
+  void enableWindowDrag(Component window,Runnable moved){
+   var drag=new MouseAdapter(){
+    Point offset;
+    boolean grip(MouseEvent e){
+     return e.getSource()!=tabs||(tabs.indexAtLocation(e.getX(),e.getY())<0
+         &&e.getY()<=tabs.getBoundsAt(0).y+tabs.getBoundsAt(0).height);
+    }
+    @Override public void mouseMoved(MouseEvent e){
+     e.getComponent().setCursor(grip(e)?Cursor.getPredefinedCursor(Cursor.MOVE_CURSOR):null);
+    }
+    @Override public void mouseExited(MouseEvent e){e.getComponent().setCursor(null);}
+    @Override public void mousePressed(MouseEvent e){
+     offset=null;
+     if(!SwingUtilities.isLeftMouseButton(e)||!grip(e))return;
+     offset=new Point(e.getXOnScreen()-window.getX(),e.getYOnScreen()-window.getY());
+    }
+    @Override public void mouseDragged(MouseEvent e){
+     if(offset==null)return;
+     int x=e.getXOnScreen()-offset.x,y=e.getYOnScreen()-offset.y;
+     if(window.getX()!=x||window.getY()!=y){
+      window.setLocation(x,y);moved.run();
+     }
+    }
+    @Override public void mouseReleased(MouseEvent e){offset=null;}
+   };
+   // Swing delivers mouse events to their target. Leave buttons, previews and sliders alone.
+   for(Component area:new Component[]{this,tabs,playbackHint,playbackHint.getParent()}){
+    area.addMouseListener(drag);area.addMouseMotionListener(drag);
+   }
+  }
   FramingContent(){super(new BorderLayout(0,12));}
  }
 
  static FramingContent content(CoverWhiteBorders.Mode mode,AlbumKey album,AlbumFraming initial,
      VinylLabelEditor.Sample sample,Style currentStyle,BiConsumer<CoverWhiteBorders.Mode,AlbumFraming> save,Runnable cancel){
+  return content(mode,album,initial,sample,currentStyle,save,cancel,false);
+ }
+
+ private static FramingContent content(CoverWhiteBorders.Mode mode,AlbumKey album,AlbumFraming initial,
+     VinylLabelEditor.Sample sample,Style currentStyle,BiConsumer<CoverWhiteBorders.Mode,AlbumFraming> save,Runnable cancel,
+     boolean awaitingCover){
   var panel=new FramingContent();
   panel.setBackground(BACKGROUND);
   panel.setBorder(BorderFactory.createEmptyBorder(14,18,14,18));
@@ -368,8 +516,8 @@ public final class CoverFramingDialog implements AutoCloseable {
 
   Supplier<CoverWhiteBorders.Bounds> currentBounds=()->null;
   if(sample==null){
-   large.add(placeholder(album==null?"请播放一首有封面的曲目。":"暂时无法读取当前专辑封面，可点「重新读取封面」再试。"));
-   cropHint.setText("取得封面后才能预览裁切结果。裁切设置用于二级展示页。");
+   large.add(placeholder(awaitingCover?" ":album==null?"请播放一首有封面的曲目。":"暂时无法读取当前专辑封面，可点「重新读取封面」再试。"));
+   cropHint.setText(awaitingCover?" ":"取得封面后才能预览裁切结果。裁切设置用于二级展示页。");
   }else{
    var preview=new LargePreview(sample);
    var bounds=new EnumMap<CoverWhiteBorders.Mode,CoverWhiteBorders.Bounds>(CoverWhiteBorders.Mode.class);
@@ -392,11 +540,19 @@ public final class CoverFramingDialog implements AutoCloseable {
    onSelection(modes,refresh);
   }
   panel.initialStyle=currentStyle.vinyl()?Style.COLORED_VINYL:currentStyle.reel()?Style.REEL_COVER:Style.CD;
-  var framing=framingPage(panel,album,initial,sample,currentStyle,currentBounds,modes);
-  panel.draft=framing.value();
+  panel.draft=()->initial;
   tabs.addTab("大封面",large);
-  tabs.addTab("盘面取景",framing.panel());
-  var pages=new JLayeredPane();
+  var pendingPage=new JPanel();
+  pendingPage.setBackground(FramingControls.PANEL);
+  tabs.addTab("盘面取景",pendingPage);
+  final var cropForEditor=currentBounds;
+  tabs.addChangeListener(event->{
+   if(tabs.getSelectedIndex()!=1||tabs.getComponentAt(1)!=pendingPage)return;
+   var framing=framingPage(panel,album,initial,sample,currentStyle,cropForEditor,modes,awaitingCover);
+   panel.draft=framing.value();
+   tabs.setComponentAt(1,framing.panel());
+  });
+  var pages=new FramingPages();
   pages.setLayout(new GridBagLayout());
   var pageBounds=new GridBagConstraints();
   pageBounds.gridx=0;
@@ -418,19 +574,35 @@ public final class CoverFramingDialog implements AutoCloseable {
   headerBounds.anchor=GridBagConstraints.NORTHEAST;
   pages.setLayer(header,JLayeredPane.PALETTE_LAYER);
   pages.add(header,headerBounds);
-  panel.add(pages,BorderLayout.CENTER);
+  var scroll=new JScrollPane(pages);
+  scroll.setBorder(null);
+  scroll.setViewportBorder(null);
+  scroll.getViewport().setBackground(BACKGROUND);
+  scroll.getVerticalScrollBar().setUnitIncrement(18);
+  scroll.getHorizontalScrollBar().setUnitIncrement(18);
+  panel.add(scroll,BorderLayout.CENTER);
 
   var actions=panel.actions;
   actions.setOpaque(false);
   var cancelButton=new ActionButton("取消",false);
   var confirm=new ActionButton("确认",true);
   cancelButton.addActionListener(event->cancel.run());
-  confirm.addActionListener(event->save.accept(selected(modes),framing.value().get()));
+  confirm.addActionListener(event->save.accept(selected(modes),panel.draft.get()));
   actions.add(cancelButton);
   actions.add(confirm);
   panel.add(actions,BorderLayout.SOUTH);
   panel.registerKeyboardAction(event->cancel.run(),KeyStroke.getKeyStroke("ESCAPE"),JComponent.WHEN_IN_FOCUSED_WINDOW);
   return panel;
+ }
+
+ private static final class FramingPages extends JLayeredPane implements Scrollable {
+  @Override public Dimension getPreferredScrollableViewportSize(){return getPreferredSize();}
+  @Override public int getScrollableUnitIncrement(Rectangle visible,int orientation,int direction){return 18;}
+  @Override public int getScrollableBlockIncrement(Rectangle visible,int orientation,int direction){
+   return Math.max(18,(orientation==SwingConstants.VERTICAL?visible.height:visible.width)-18);
+  }
+  @Override public boolean getScrollableTracksViewportWidth(){return getParent().getWidth()>=getMinimumSize().width;}
+  @Override public boolean getScrollableTracksViewportHeight(){return getParent().getHeight()>=getMinimumSize().height;}
  }
 
  private record FramingPage(JPanel panel,Supplier<AlbumFraming> value){}
@@ -442,7 +614,7 @@ public final class CoverFramingDialog implements AutoCloseable {
  }
 
  private static FramingPage framingPage(FramingContent controls,AlbumKey album,AlbumFraming initial,VinylLabelEditor.Sample sample,Style currentStyle,
-     Supplier<CoverWhiteBorders.Bounds> crop,ButtonGroup modes){
+     Supplier<CoverWhiteBorders.Bounds> crop,ButtonGroup modes,boolean awaitingCover){
   var panel=new JPanel(new BorderLayout(0,8));
   panel.setBackground(FramingControls.PANEL);
   panel.setBorder(BorderFactory.createEmptyBorder(8,10,8,10));
@@ -461,7 +633,7 @@ public final class CoverFramingDialog implements AutoCloseable {
   heading.add(controls.albumActions);
   panel.add(heading,BorderLayout.NORTH);
   if(sample==null){
-   panel.add(placeholder(album==null?"请先播放带有专辑信息的曲目，或选择专辑。":"暂时无法读取当前专辑封面，可点「重新读取封面」再试。"));
+   panel.add(placeholder(awaitingCover?" ":album==null?"请先播放带有专辑信息的曲目，或选择专辑。":"暂时无法读取当前专辑封面，可点「重新读取封面」再试。"));
    return new FramingPage(panel,()->initial);
   }
 
@@ -643,6 +815,7 @@ public final class CoverFramingDialog implements AutoCloseable {
 
  @Override public void close(){
   if(active==this)active=null;
+  previews.close();
   SwingUtilities.invokeLater(()->{if(workspace!=null)workspace.requestClose();});
  }
 }

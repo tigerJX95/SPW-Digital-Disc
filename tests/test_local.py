@@ -28,7 +28,7 @@ tests = [
     'ProductionResumeTest', 'ProductionLayoutRecoveryTest', 'ObservableHandoffTest', 'ProductionRotationHandoffTest',
     'HostEntryTest', 'HostImageDrawTest', 'RootRasterTest', 'VinylRendererTest', 'VinylLabelFramingTest', 'CoverDiscTest',
     'LocalDiscRasterTest', 'DiscMotionRasterTest', 'ReflectionTest', 'RevealOrderTest',
-    'RevealCycleTest', 'DiscExposureTest', 'DiscSettingsTest', 'CoverFramingDialogTest', 'FramingAlbumLibraryTest', 'PreferenceSchemaTest', 'FrontSettingsTest', 'FrontRendererTest', 'FrontDiscMotionTest', 'DiscRotationTest', 'RotationSettingsTest', 'RotationRendererTest', 'DiscMotionContinuityTest', 'TimedDiscMotionRasterTest', 'RotationHandoffTest', 'HostCompatibilityTest', 'PluginSourceMetadataTest', 'HostBindingsTest', 'DynamicHostBindingsTest',
+    'RevealCycleTest', 'DiscExposureTest', 'DiscSettingsTest', 'CoverFramingDialogTest', 'PlayingCoverPreviewTest', 'FramingAlbumLibraryTest', 'PreferenceSchemaTest', 'FrontSettingsTest', 'FrontRendererTest', 'FrontDiscMotionTest', 'DiscRotationTest', 'RotationSettingsTest', 'RotationRendererTest', 'DiscMotionContinuityTest', 'TimedDiscMotionRasterTest', 'RotationHandoffTest', 'HostCompatibilityTest', 'HostDiagnosticsTest', 'HostLifecycleTest', 'PluginSourceMetadataTest', 'HostBindingsTest', 'DynamicHostBindingsTest',
 ]
 if first_reveal_only:
     tests = ['FirstRevealPreparationTest', 'ReflectionTest', 'EntryTimingTest', 'CoverHandoffTest', 'ReelEntryRasterTest', 'VinylRendererTest']
