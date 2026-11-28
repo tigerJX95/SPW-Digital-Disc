@@ -55,7 +55,10 @@ final class FramingAlbumLibrary {
  }
 
  static Entry playingEntry(){
-  var track=WorkshopApi.playback().getCurrentMediaItem();
+  return entry(WorkshopApi.playback().getCurrentMediaItem());
+ }
+
+ static Entry entry(MediaItem track){
   if(track==null||track.getPath()==null||track.getPath().isBlank())return null;
   var album=AlbumKey.of(track.getAlbum(),track.getAlbumArtist(),track.getArtist(),track.getYear(),track.getPath());
   var id=track.getId();

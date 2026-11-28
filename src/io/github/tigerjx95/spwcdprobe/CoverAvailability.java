@@ -21,6 +21,7 @@ final class CoverAvailability {
   resolved=true;missing=absent;
  }
  synchronized boolean available(String current){return resolved&&!missing&&Objects.equals(song,current);}
+ synchronized long availableRevision(String current){return available(current)?request:0;}
  synchronized boolean missing(String current){return resolved&&missing&&Objects.equals(song,current);}
  synchronized boolean refreshNeeded(String current,long now){
   observe(current,now);

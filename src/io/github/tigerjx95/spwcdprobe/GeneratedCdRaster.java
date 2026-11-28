@@ -92,14 +92,15 @@ final class GeneratedCdRaster implements AutoCloseable {
 
  private void clear(){
   requested=null;
-  if(queued!=null){queued.pixels().close();queued=null;}
-  if(ready!=null){ready.close();ready=null;}
+  Job discarded=queued;queued=null;
+  Image previous=ready;ready=null;
+  try{if(discarded!=null)discarded.pixels().close();}
+  finally{if(previous!=null)previous.close();}
  }
 
  @Override public synchronized void close(){
   closed=true;
-  clear();
-  worker.shutdownNow();
+  try{clear();}finally{worker.shutdownNow();}
  }
 
  private static Image bake(Key key,Image pixels)throws Exception{

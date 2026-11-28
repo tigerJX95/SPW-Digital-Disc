@@ -27,7 +27,7 @@ public class HostCompatibilityTest {
   }finally{if(os==null)System.clearProperty("os.name");else System.setProperty("os.name",os);}
   for(String path:PATHS)for(boolean missing:new boolean[]{false,true}){
    try{HostCompatibility.verify(context(HostCompatibility.current().version()+"-reported-build",Channel.Steam),changed(path,missing));throw new AssertionError("unrecognized class must be rejected");}
-   catch(IllegalStateException expected){String message=expected.getMessage();check(message.contains("reported-build")&&message.contains("Steam")&&message.contains(path.replace('/','.').replace(".class","")),"diagnostic identifies actual build/channel/class");check(message.contains("ffmpeg-x64.dll"),"diagnostic explains required adaptation input");rejected++;}
+   catch(IllegalStateException expected){String message=expected.getMessage();check(message.contains("reported-build")&&message.contains("Steam")&&message.contains(path.replace('/','.').replace(".class","")),"diagnostic identifies actual build/channel/class");check(message.contains("HOST_REJECTED")&&message.contains("HOST_DETECTED"),"diagnostic explains required adaptation input");rejected++;}
   }
   System.out.println("PASS host preflight: "+accepted+" OS/channel/version metadata combinations over known real class bytes; "+rejected+" changed/missing critical classes rejected with actionable diagnostics. Each JVM run uses its actual supplied host archive.");
  }

@@ -36,19 +36,19 @@ final class HostCompatibility {
      var targets=HostClassDiscovery.current(loader);
      return new Profile(profile.version(),targets.owner(),targets.caller(),targets.painter(),targets.local(),protectedEntries,profile.playback());
     }catch(RuntimeException discovery){
-     throw new IllegalStateException("不兼容的宿主接口："+actual+"；动态定位失败。请提供当前安装目录 app/ffmpeg-x64.dll 以核对适配。",discovery);
+     throw new IllegalStateException("不兼容的宿主接口："+actual+"；动态定位失败。请附上日志中的 HOST_DETECTED 和 HOST_REJECTED 记录。",discovery);
     }
    }
-   if(failure.isEmpty()||hint.startsWith(profile.version()))failure=profile.version()+": "+error;
+   if(failure.isEmpty()||(hint!=null&&hint.startsWith(profile.version())))failure=profile.version()+": "+error;
   }
-  throw new IllegalStateException("不兼容的宿主接口："+actual+"；"+failure+"。请提供当前安装目录 app/ffmpeg-x64.dll 以核对适配。");
+  throw new IllegalStateException("不兼容的宿主接口："+actual+"；"+failure+"。请附上日志中的 HOST_DETECTED 和 HOST_REJECTED 记录。");
  }
  private static String mismatch(List<Entry> entries,ClassLoader loader){
   for(Entry entry:entries)try(InputStream in=loader.getResourceAsStream(entry.name().replace('.','/')+".class")){
    if(in==null)return entry.name()+" (missing class)";
    String hash=HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(in.readAllBytes()));
    if(!entry.sha256().equals(hash))return entry.name()+" (class fingerprint differs)";
-  }catch(Exception e){return entry.name()+" ("+e+")";}
+  }catch(Exception e){return entry.name()+" ("+e.getClass().getSimpleName()+")";}
   return null;
  }
  private static final class Detected {static final Profile VALUE=resolve("当前宿主","",HostCompatibility.class.getClassLoader());}

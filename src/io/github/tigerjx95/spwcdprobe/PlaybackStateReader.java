@@ -5,7 +5,7 @@ import java.util.function.Consumer;
 final class PlaybackStateReader {
  private Field service;
  private Method player,isPlaying;
- private boolean warned,unsupported;
+ private boolean readFailed,unsupported;
  static Method resolvePlaying(Class<?> playerType)throws NoSuchMethodException{
   Method match=null;
   for(Method method:playerType.getDeclaredMethods()){
@@ -35,18 +35,26 @@ final class PlaybackStateReader {
    unsupported=false;
    return true;
   }catch(ReflectiveOperationException|RuntimeException|LinkageError unavailable){
-   unavailable(report,unavailable);return false;
+   report.accept("ROTATION_STATE_UNAVAILABLE stage=bind cause="+unavailable.getClass().getSimpleName());return false;
   }
  }
  boolean playing(Consumer<String> report){
   if(!prepare(report))return false;
   try{
-   Object host=service.get(null);return host!=null&&Boolean.TRUE.equals(isPlaying.invoke(player.invoke(host)));
+   Object host=service.get(null);
+   if(host==null)return false;
+   Object activePlayer=player.invoke(host);
+   if(activePlayer==null)return false;
+   boolean playing=Boolean.TRUE.equals(isPlaying.invoke(activePlayer));
+   if(readFailed){readFailed=false;report.accept("ROTATION_STATE_RECOVERED stage=read");}
+   return playing;
   }catch(ReflectiveOperationException|RuntimeException|LinkageError unavailable){
-   unavailable(report,unavailable);return false;
+   if(!readFailed){
+    readFailed=true;
+    Throwable cause=unavailable instanceof InvocationTargetException invocation&&invocation.getCause()!=null?invocation.getCause():unavailable;
+    report.accept("ROTATION_STATE_UNAVAILABLE stage=read cause="+cause.getClass().getSimpleName());
+   }
+   return false;
   }
- }
- private void unavailable(Consumer<String> report,Throwable error){
-  if(!warned){warned=true;report.accept("ROTATION_STATE_UNAVAILABLE "+error.getClass().getSimpleName());}
  }
 }

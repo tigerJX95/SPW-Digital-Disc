@@ -5,6 +5,8 @@ import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Component;
 import java.awt.Container;
+import java.awt.Dimension;
+import java.awt.Point;
 import java.awt.Rectangle;
 import java.awt.event.InputEvent;
 import java.awt.event.InputMethodEvent;
@@ -50,6 +52,63 @@ public class CoverFramingDialogTest {
   return image;
  }
 
+ private static void windowPlacement(){
+  Rectangle desktop=new Rectangle(-1280,36,1280,924);
+  Rectangle host=new Rectangle(-1160,80,960,620);
+  Rectangle large=CoverFramingDialog.fittedBounds(new Dimension(900,880),desktop,host);
+  if(!host.contains(large)||large.getCenterY()!=host.getCenterY()||large.getCenterX()!=host.getCenterX())
+   throw new AssertionError("late cover must fit and center inside player on secondary screen");
+  var small=CoverFramingDialog.fittedBounds(new Dimension(430,380),desktop,host);
+  if(small.getCenterX()!=large.getCenterX()||small.getCenterY()!=large.getCenterY())
+   throw new AssertionError("placeholder and loaded cover share a center");
+  var partial=new Rectangle(-1400,-60,810,500);
+  var visible=desktop.intersection(partial);
+  var fitted=CoverFramingDialog.fittedBounds(new Dimension(1300,1100),desktop,partial);
+  if(!visible.contains(fitted)||fitted.getCenterX()!=visible.getCenterX()||fitted.getCenterY()!=visible.getCenterY())
+   throw new AssertionError("center in visible player area and exclude taskbar");
+  var nearLeft=new Rectangle(-1260,120,700,500);
+  var right=CoverFramingDialog.pickerBounds(nearLeft,desktop,340);
+  if(right.x!=nearLeft.x+nearLeft.width||right.y!=nearLeft.y||!desktop.contains(right))
+   throw new AssertionError("picker fits to the right on a secondary screen");
+  var nearRight=new Rectangle(-720,120,700,500);
+  var left=CoverFramingDialog.pickerBounds(nearRight,desktop,340);
+  if(left.x+left.width!=nearRight.x||left.y!=nearRight.y||!desktop.contains(left))
+   throw new AssertionError("picker fits to the left when the right side is occupied");
+  var narrow=new Rectangle(10,50,280,400);
+  if(!narrow.equals(CoverFramingDialog.pickerBounds(new Rectangle(20,60,260,500),narrow,340)))
+   throw new AssertionError("picker fits the usable screen when neither side has space");
+ }
+
+ private static void gesture(Component c,int x,int y,int button){
+  int mask=button==MouseEvent.BUTTON1?InputEvent.BUTTON1_DOWN_MASK:InputEvent.BUTTON3_DOWN_MASK;
+  c.dispatchEvent(new MouseEvent(c,MouseEvent.MOUSE_PRESSED,10,mask,x,y,300,200,1,false,button));
+  c.dispatchEvent(new MouseEvent(c,MouseEvent.MOUSE_DRAGGED,11,mask,x+32,y-16,332,184,0,false,MouseEvent.NOBUTTON));
+  c.dispatchEvent(new MouseEvent(c,MouseEvent.MOUSE_RELEASED,12,0,x,y,332,184,1,false,button));
+ }
+
+ private static void windowDragAndFooter(CoverFramingDialog.FramingContent panel){
+  JPanel target=new JPanel();target.setLocation(70,40);
+  int[] moved={0};
+  panel.enableWindowDrag(target,()->moved[0]++);
+  panel.setSize(600,380);layout(panel);
+  var tabs=panel.tabs;
+  var last=tabs.getBoundsAt(1);
+  Point grip=SwingUtilities.convertPoint(tabs,last.x+last.width+8,last.y+last.height/2,panel);
+  var hit=SwingUtilities.getDeepestComponentAt(panel,grip.x,grip.y);
+  if(hit!=tabs)throw new AssertionError("blank strip should receive drag events: "+hit);
+  gesture(hit,last.x+last.width+8,last.y+last.height/2,MouseEvent.BUTTON1);
+  if(!target.getLocation().equals(new Point(102,24))||moved[0]!=1)throw new AssertionError("drag tracks pointer offset");
+  gesture(tabs,last.x+1,last.y+1,MouseEvent.BUTTON1);
+  gesture(tabs,last.x+last.width+8,last.y+last.height/2,MouseEvent.BUTTON3);
+  if(moved[0]!=1||tabs.getSelectedIndex()!=1)throw new AssertionError("tab click selects tab, right drag ignored");
+  for(String title:List.of("取消","确认")){
+   var button=find(panel,JButton.class,b->title.equals(b.getText()));
+   var bounds=SwingUtilities.convertRectangle(button.getParent(),button.getBounds(),panel);
+   if(bounds.isEmpty()||!panel.contains(bounds.x+bounds.width-1,bounds.y+bounds.height-1))
+    throw new AssertionError("footer outside compact player: "+bounds);
+  }
+  tabs.setSelectedIndex(0);
+ }
  private record Save(CoverWhiteBorders.Mode mode,AlbumFraming framing){}
 
  public static void main(String[] args)throws Exception{
@@ -67,6 +126,7 @@ public class CoverFramingDialogTest {
    var album=new DiscSettings.AlbumKey("测试专辑",null,2026,null);
    var panel=CoverFramingDialog.content(CoverWhiteBorders.Mode.OFF,album,AlbumFraming.FOLLOW,new VinylLabelEditor.Sample(cover,0xff449966),Style.CD,
        (mode,framing)->saves.add(new Save(mode,framing)),()->{});
+   windowPlacement();windowDragAndFooter(panel);
    var tabs=find(panel,JTabbedPane.class,item->true);
    if(tabs.getTabCount()!=2||!List.of("大封面","盘面取景").equals(List.of(tabs.getTitleAt(0),tabs.getTitleAt(1))))
     throw new AssertionError("the shared settings contains both previews");
@@ -209,14 +269,17 @@ public class CoverFramingDialogTest {
   var second=new AlbumKey("专辑 B",null,2026,null);
   var playing=new AtomicReference<>(new FramingAlbumLibrary.Entry(first,List.of("a1")));
   var cover=new AtomicReference<>(solidCover(Color.RED));
+  var warm=new PlayingCoverPreview(entry->CompletableFuture.completedFuture(cover.get()));
+  warm.request(playing.get()).join();
   try(var settings=new DiscSettings(manager,values->{});
       var dialog=new CoverFramingDialog(settings,playing::get,(album,color)->{
        var entry=playing.get();
        return entry!=null&&entry.key().equals(album)?new VinylLabelEditor.Sample(cover.get(),0):null;
-      })){
+      },warm)){
    SwingUtilities.invokeAndWait(()->{
     var workspace=dialog.new AlbumWorkspace(null,entry->CompletableFuture.completedFuture(null));
     try{
+     workspace.openPlayingAlbum();
      var view=find(workspace,CoverFramingDialog.FramingContent.class,item->true);
      var large=paint(view);
      var locate=view.locatePlaying;
@@ -256,7 +319,7 @@ public class CoverFramingDialogTest {
      view=find(workspace,CoverFramingDialog.FramingContent.class,item->true);
      if(view.draft.get().cd().zoom()!=145)
       throw new AssertionError("locating album A restores its original draft");
-     var picker=(FramingAlbumPicker)((BorderLayout)workspace.getLayout()).getLayoutComponent(BorderLayout.EAST);
+     var picker=workspace.albumPicker();
      picker.setVisible(true);
      var playingEntry=playing.get();
      var anotherEntry=new FramingAlbumLibrary.Entry(second,List.of("b2"));
@@ -287,17 +350,20 @@ public class CoverFramingDialogTest {
   var playingEntry=new AtomicReference<>(first);
   var readCount=new java.util.concurrent.atomic.AtomicInteger();
   var workspaceRef=new AtomicReference<CoverFramingDialog.AlbumWorkspace>();
+  var warm=new PlayingCoverPreview(entry->CompletableFuture.completedFuture(solidCover(Color.RED)));
+  warm.request(first).join();
   try(var settings=new DiscSettings(manager,values->{});
       var dialog=new CoverFramingDialog(settings,playingEntry::get,(album,color)->
-          album.equals(first.key())?new VinylLabelEditor.Sample(solidCover(Color.RED),0):null)){
+          album.equals(first.key())?new VinylLabelEditor.Sample(solidCover(Color.RED),0):null,warm)){
    try{
     SwingUtilities.invokeAndWait(()->{
      var workspace=dialog.new AlbumWorkspace(null,entry->{readCount.incrementAndGet();return loads.get(entry.key().album());});
+     workspace.openPlayingAlbum();
      workspaceRef.set(workspace);
      // Exercise displayability checks without exposing a native window in headless tests.
      workspace.setVisible(false);
      workspace.addNotify();
-     var picker=(FramingAlbumPicker)((BorderLayout)workspace.getLayout()).getLayoutComponent(BorderLayout.EAST);
+     var picker=workspace.albumPicker();
      picker.setVisible(true);
      var list=albumList(picker);
      ((DefaultListModel<FramingAlbumLibrary.Entry>)list.getModel()).addAll(entries);
@@ -329,7 +395,7 @@ public class CoverFramingDialogTest {
      view.tabs.setSelectedIndex(0);
      if(displayedCoverColor(view)!=Color.BLUE.getRGB())
       throw new AssertionError("an older cover completion cannot replace the selected image");
-     var list=albumList(find(workspace,FramingAlbumPicker.class,item->true));
+     var list=albumList(workspace.albumPicker());
      clickAlbumRow(list,0);
      view=find(workspace,CoverFramingDialog.FramingContent.class,item->true);
      if(view.draft.get().cd().zoom()!=144)
